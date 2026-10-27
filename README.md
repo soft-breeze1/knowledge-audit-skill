@@ -14,8 +14,6 @@
 [![Dependencies](https://img.shields.io/badge/%E7%AC%AC%E4%B8%89%E6%96%B9%E4%BE%9D%E8%B5%96-0-047857)](#快速开始)
 [![License](https://img.shields.io/badge/License-MIT-16a34a)](LICENSE)
 
-`Agent Skills` · `Claude Code` · `Codex` · `知识库审计` · `转写质量` · `参数一致性` · `HTML 报告` · `XLSX 清单`
-
 </div>
 
 ---
@@ -30,7 +28,8 @@
 - **每条结论可复核**：附文件、行号、证据原文，不猜也不编；
 - **只报问题、不设分级**：性质判断交给人；
 - **只读**：不改动输入文档，报告只写进 `output/<时间戳>/`；
-- **零依赖**：Python 3.9+ 标准库即可，XLSX 也由标准库手写，不需要 `pip install`。
+- **零依赖、可移植**：只用 Python 3.9+ 标准库（XLSX 也由标准库手写），Windows / macOS / Linux 一致，中文路径开箱可用；
+- **口径可追溯**：检查规则与单位换算放在 `rules/*.json`，报告写明检查项、规则来源与生成时间。
 
 ## 工作流程
 
@@ -94,18 +93,13 @@ python scripts/detect_conflicts.py input/                         # 只跑②属
 | `--retries` | `3` | 单个失败请求的重试次数（指数退避）；抓取结束后还会对失败文档补抓几轮 |
 | `--proxy` | `auto` | `auto` 探测直连与系统代理后选更快的；也可 `direct` / `system` / `<host:port 或 URL>` |
 | `--overwrite` | 关闭 | 忽略本地已有文件强制重抓；默认断点续跑，中断后重跑同一条命令只补缺口 |
-| `--api-base` | `<站点>/api/v1` | 抓取接口根地址（接口挂在别的前缀下时指定） |
-| `--token-header` | `x-access-token` | 令牌请求头名 |
-| `--workspace` | — | 限定工作区（名称或 ID） |
-| `--any-quality` | 关闭 | 不做质量状态过滤（默认只抓 `qualityStatus=PASS`） |
-| `--all-assets` | 关闭 | 抓列表内全部资产，不做类型 / 生命周期 / 质量过滤 |
+| `--all-assets` | 关闭 | 抓列表内全部资产，不做类型 / 生命周期 / 质量过滤（另有 `--any-quality` 放宽质量状态） |
 | `--strict-fetch` | 关闭 | 有任何一篇漏取即中止流水线；默认漏取只提示，审查照常进行 |
-| `--no-progress` | 关闭 | 关闭进度条 |
+| `--api-base` / `--token-header` / `--workspace` | `<站点>/api/v1` / `x-access-token` / — | 接口根地址 / 令牌请求头名 / 限定工作区 |
 
-- 并发只用于「取版本 + 取正文」；列表分页、资产过滤与「同一文档只抓第一份」仍在单线程按列表顺序判定，结果与单线程一致；
-- 断点续跑以本地文件作为进度，不产生额外状态文件；正文 URL 支持完整地址、站点绝对路径、已含接口前缀、相对路径四种写法；
-- 接口返回 200 但正文是 JSON / HTML 报错页时会被拒收并单独计数（`fetch_knowledge.py --keep-raw-content` 可关闭校验）；
-- 抓取与审查全程显示进度条，重定向到文件或 CI 日志时自动降级为每 5% 一行。
+- 并发只用于「取版本 + 取正文」；列表分页、资产过滤与「同一文档只抓第一份」仍按列表顺序单线程判定，结果与单线程一致；断点续跑以本地文件为进度，不产生额外状态文件；
+- 正文 URL 支持完整地址、站点绝对路径、已含接口前缀、相对路径四种写法；接口返回 200 但正文是 JSON / HTML 报错页时会被拒收并单独计数（`--keep-raw-content` 可关闭校验）；
+- 进度条在重定向到文件或 CI 日志时自动降级为每 5% 一行。
 
 ## 交付物
 
@@ -134,9 +128,7 @@ cp -r .claude/skills/knowledge-audit ~/.claude/skills/                        # 
 cp -r .agents/skills/knowledge-audit /path/to/your-project/.agents/skills/
 ```
 
-其他客户端：把 `knowledge-audit/` 目录（`SKILL.md` + `scripts/` + `rules/`）放进客户端扫描的 skills 目录，例如 `<client>/skills/knowledge-audit/`；可选校验：`npx skills-ref validate ./knowledge-audit-skill`。
-
-用法：自然语言触发（“帮我审查这批知识库文档的转写质量”），或在支持技能命令的客户端里显式调用 `/knowledge-audit input/`。
+其他客户端：把 `knowledge-audit/` 目录（`SKILL.md` + `scripts/` + `rules/`）放进客户端扫描的 skills 目录即可。用法：自然语言触发（“帮我审查这批知识库文档的转写质量”），或显式调用 `/knowledge-audit input/`。
 
 > 根目录 `SKILL.md` 是唯一真源，`.claude/` 与 `.agents/` 下是由脚本同步的副本：改完执行 `python scripts/sync_skill.py`，校验用 `python scripts/sync_skill.py --check`（不一致时退出码 1）。
 
@@ -147,23 +139,14 @@ cp -r .agents/skills/knowledge-audit /path/to/your-project/.agents/skills/
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
 | `input` | — | 待审查的 Markdown 文件或目录（与 `--url` 二选一） |
-| `--url` | — | 在线知识库列表页地址；给出后先抓取 Markdown 再审查 |
-| `--api-base` | `<站点>/api/v1` | 抓取接口根地址 |
-| `--token` | 环境变量 `KB_ACCESS_TOKEN` | 访问令牌 |
-| `--token-header` | `x-access-token` | 令牌请求头名 |
-| `--limit` | `200` | 抓取篇数上限，`0` 表示不限制 |
-| `--workspace` | — | 限定工作区（名称或 ID） |
-| `--any-quality` | 关闭 | 抓取时不检查质量状态 |
-| `--all-assets` | 关闭 | 抓取全部资产，不做类型 / 状态 / 质量过滤 |
-| `--workers` / `--retries` / `--proxy` | `8` / `3` / `auto` | 见上方「在线抓取」 |
-| `--overwrite` / `--strict-fetch` | 关闭 | 强制重抓 / 任一漏取即中止 |
-| `--kb-output` | `<输出根目录>/_kb_source/<时间戳>` | 抓取到的 Markdown 写入目录 |
 | `--output` | `output` | 输出根目录（每次运行在其下新建时间戳子目录） |
 | `--report-name` | `知识库文档解析与转写质量问题报告` | 质量审查报告基名 |
 | `--rules` / `--alias-rules` | `rules/ocr_patterns.json` / `rules/attribute_aliases.json` | 规则文件 |
 | `--max-file-size` | `20971520`（20 MB） | 单文件大小上限，超过则跳过内容级检查 |
 | `--fail-on-issue` | 关闭 | 发现问题时以退出码 3 结束 |
 | `--no-progress` | 关闭 | 关闭进度条 |
+
+在线抓取相关参数（`--url`、`--token`、`--api-base`、`--limit`、`--workers`、`--retries`、`--proxy`、`--all-assets`、`--overwrite`、`--strict-fetch`、`--kb-output` 等）见上方「在线抓取（可选）」。
 
 单阶段脚本：
 
@@ -209,48 +192,21 @@ cp -r .agents/skills/knowledge-audit /path/to/your-project/.agents/skills/
 - 取值比较：① 各方单位都已收录且量纲相同 → 按换算后的标准值比较；② 单位字面相同但未收录 → 按数值字面比较；③ 其余 → 按原始取值字面比较；
 - 抽取为规则式（非语义理解）：只识别可客观定位的形态（两列表、“属性-取值-单位”列组表、正文 `属性：数值+单位`）；标识类字段（物料编码 / 零件号 / 图号 / 序号）、故障排查表、备件清单、版本履历表、复合取值（范围、多维尺寸）不抽取；未识别型号或只有单一来源的记录不参与比对（只给数量）。
 
-## 输出与目录规则
+## 输出目录
 
 ```text
 output/
 ├── 20261026-135023/                     # 本次运行的时间戳子目录（YYYYMMDD-HHMMSS）
-│   ├── 知识库文档解析与转写质量问题报告.html
-│   ├── 知识库文档解析与转写质量问题报告.xlsx
-│   ├── 知识库同类属性冲突审查报告.html
-│   └── 知识库同类属性冲突审查报告.xlsx
+│   ├── 知识库文档解析与转写质量问题报告.html / .xlsx
+│   └── 知识库同类属性冲突审查报告.html / .xlsx
 └── _kb_source/
     └── 20261026-124001/                 # 在线抓取的 Markdown（输入缓存，不计入交付文件）
 ```
 
 - 一次任务一个目录，多次运行互不覆盖；用 `--output` 指定时直接写入该目录；
-- 扫描输入时自动排除：输出目录、本工具生成的报告文件、以 `.` 开头的隐藏目录、`__pycache__` / `node_modules` / `venv`；
+- 扫描输入时自动排除：输出目录、本工具生成的报告文件、隐藏目录、`__pycache__` / `node_modules` / `venv`；
 - 只交付 HTML 与 XLSX 两类文件，全流程**不生成 Markdown / JSON 文件**（`rules/*.json` 是配置输入，由你维护）；
 - 运行开始时会打印输入路径（绝对路径）、交付目录与匹配到的 Markdown 文件数，报告文末「本次运行信息」同样给出输入路径。
-
-## 目录结构
-
-```text
-knowledge-audit-skill/
-├── SKILL.md                        # 技能定义（唯一真源：做什么 / 何时用 / 怎么跑）
-├── README.md
-├── scripts/
-│   ├── run_all.py                  # 一条命令跑完整流水线
-│   ├── fetch_knowledge.py          # ⓪ 在线知识库抓取（可选；抓下来的是输入缓存）
-│   ├── audit_markdown.py           # ① 转写质量审查
-│   ├── detect_conflicts.py         # ② 同一型号属性冲突比对
-│   ├── attribute_extract.py        # 规则式属性抽取（库模块）
-│   ├── generate_report.py          # 时间戳目录 / XLSX / 进度条等共享代码
-│   ├── html_report.py              # 自包含 HTML 渲染
-│   └── sync_skill.py               # 同步 SKILL.md 到两个技能发现目录
-├── rules/
-│   ├── ocr_patterns.json           # 文本异常规则（OCR 标记 / 占位符 / 乱码）
-│   └── attribute_aliases.json      # 属性别名与单位换算
-├── input/                          # 演示语料（机型与参数全部虚构）
-├── output/                         # 交付目录（已 gitignore，仅保留 .gitkeep）
-└── .claude/ · .agents/             # 两个 Agent 客户端的项目级技能发现路径
-```
-
-> 版本号在 `scripts/generate_report.py` 的 `TOOL_VERSION`（当前 `1.0.0`），会出现在报告页脚与「本次运行信息」中。改口径后建议：跑一遍 `input/` 核对预期结果 → `python scripts/sync_skill.py` → 提交。
 
 ## 规则配置
 
@@ -258,26 +214,20 @@ knowledge-audit-skill/
 
 ```json
 // rules/ocr_patterns.json —— pattern 为 Python re 正则，flags 可选 IGNORECASE / MULTILINE
-{
-  "rules": {
-    "ocr_markers": [
-      { "id": "ocr-bracket-en", "pattern": "(?<!!)\\[\\s*OCR\\s*\\](?!\\()",
-        "flags": ["IGNORECASE"], "description": "英文方括号 OCR 标记残留（如 [OCR]）",
-        "suggested_action": "对照原始文档，将 OCR 标记替换为真实内容，或删除该标记。" }
-    ],
-    "placeholders": [ { "id": "wait-supplement", "pattern": "待补充" } ],
-    "mojibake": [ { "id": "gbk-mojibake", "pattern": "锟斤拷|烫烫烫" } ]
-  }
-}
+{ "rules": {
+  "ocr_markers": [ { "id": "ocr-bracket-en", "pattern": "(?<!!)\\[\\s*OCR\\s*\\](?!\\()",
+                     "flags": ["IGNORECASE"], "description": "方括号 OCR 标记残留（如 [OCR]）",
+                     "suggested_action": "对照原始文档替换为真实内容，或删除该标记。" } ],
+  "placeholders": [ { "id": "wait-supplement", "pattern": "待补充" } ],
+  "mojibake":     [ { "id": "gbk-mojibake", "pattern": "锟斤拷|烫烫烫" } ]
+} }
 ```
 
 ```json
 // rules/attribute_aliases.json —— 标准属性名 → 同义词；单位写法 → 标准符号与换算因子
-{
-  "attribute_aliases": { "重量": ["整机重量", "操作重量", "工作重量", "weight"] },
+{ "attribute_aliases": { "重量": ["整机重量", "操作重量", "weight"] },
   "unit_symbols": { "吨": "t", "千瓦": "kW", "转/分": "r/min" },
-  "units": { "mass": { "canonical": "kg", "factors": { "kg": 1.0, "t": 1000.0, "公斤": 1.0 } } }
-}
+  "units": { "mass": { "canonical": "kg", "factors": { "kg": 1.0, "t": 1000.0 } } } }
 ```
 
 - 类别与检查项对应：`ocr_markers` → OCR 标记残留、`placeholders` → 占位符文本、`mojibake` → 编码乱码特征；
@@ -303,19 +253,9 @@ knowledge-audit-skill/
 
 ## 常见问题
 
-<details><summary><b>会修改我的文档吗？</b></summary>
+<details><summary><b>会修改我的文档吗？需要装依赖吗？能直接审 DOCX / PDF / 图片吗？</b></summary>
 
-不会。全流程只读输入，报告只写进 `output/` 下的时间戳子目录；扫描输入时还会排除输出目录与本工具生成的报告文件。
-</details>
-
-<details><summary><b>需要安装第三方依赖吗？</b></summary>
-
-不需要。Python 3.9+ 标准库即可，XLSX 的 Open XML 也由标准库手写。
-</details>
-
-<details><summary><b>可以直接审查 DOCX / PDF / 图片吗？</b></summary>
-
-不能。本技能只审查**已经转写好的 Markdown 文本**，不解析原始文件，也不承诺“转写内容与原始文档逐字一致”。
+不会改，也不需要装依赖：输入全程只读，只用 Python 3.9+ 标准库（XLSX 的 Open XML 也由标准库手写），报告只写进 `output/` 下的时间戳子目录。但不能审 DOCX / PDF / 图片 —— 本技能只审查**已经转写好的 Markdown 文本**，不解析原始文件，也不承诺“转写内容与原始文档逐字一致”。
 </details>
 
 <details><summary><b>为什么很多“看着像问题”的写法没被报出来？</b></summary>
@@ -333,15 +273,16 @@ knowledge-audit-skill/
 按顺序自查：① 型号是否与原文完全一致；② 属性名是否归一化到同一标准名（见 `rules/attribute_aliases.json`）；③ 工况限定词是否一致（额定 / 最大 / 最小 / 尾部括注算不同工况）；④ 证据是否来自 ≥2 个不同文件；⑤ 报告「比对概况」里的「未参与比对的记录」是否很多。仍不确定时，用两个 `.md` 组成最小复现语料单独跑一次最容易定位。
 </details>
 
-## 设计原则
+## 版本更迭
 
-1. **可复核**：每条问题附文件、行号、证据原文；不虚构内容、不武断下结论；
-2. **只报问题、不分级**：性质判断交给人；
-3. **冲突门槛严格**：型号 + 属性名 + 工况完全一致、取值不一致、证据来自 ≥2 个不同文件，三条同时满足才列入；
-4. **全程只读**：输入为 Markdown 文件夹 / 单个 `.md` / 在线知识库地址，输出只写 `output/`；
-5. **口径可追溯**：检查规则与单位换算放在 `rules/*.json`，报告写明检查项、规则来源、输入路径与生成时间；
-6. **宁可少报、不可误报**：无法客观定位的形态不抽取，未识别型号与单一来源的记录不参与比较；
-7. **零依赖、可移植**：只用标准库，Windows / macOS / Linux 一致，中文文件名与中文路径开箱可用。
+| 版本 | 解决了什么 |
+| --- | --- |
+| `1.0.3` | 精简 README 篇幅，补充版本更迭记录 |
+| `1.0.2` | 修复 Windows 上 CI 交付文件校验失败（改用 `scripts/check_deliverables.py`） |
+| `1.0.1` | 在线抓取支持并发、断点续跑、失败重试与连接自适应；审查增加进度条、统计自检与可配置的失败门控 |
+| `1.0.0` | 初始版本：转写质量审查（固定 6 项）+ 同一型号属性冲突检测 |
+
+> 版本号在 `scripts/generate_report.py` 的 `TOOL_VERSION`，会出现在报告页脚与「本次运行信息」中。改口径后建议：跑一遍 `input/` 核对预期结果 → `python scripts/sync_skill.py` → 提交。
 
 ## 许可证
 
