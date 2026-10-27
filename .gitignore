@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 审计报告输出（保留目录占位文件）
+output/*
+!output/.gitkeep
+
+# 临时文件
+*.tmp
+.tmp_*
+.DS_Store
+Thumbs.db

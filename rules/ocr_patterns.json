@@ -1,0 +1,114 @@
+{
+  "version": "1.0",
+  "description": "文本异常模式规则：OCR 标记残留、占位符、乱码特征。pattern 为 Python 正则表达式（re 语法），可按需增删；flags 可选值为 IGNORECASE、MULTILINE。",
+  "rules": {
+    "ocr_markers": [
+      {
+        "id": "ocr-bracket-en",
+        "pattern": "(?<!!)\\[\\s*OCR\\s*\\](?!\\()",
+        "flags": ["IGNORECASE"],
+        "description": "英文方括号 OCR 标记残留（如 [OCR]）",
+        "suggested_action": "对照原始文档，将 OCR 标记替换为真实内容，或删除该标记。"
+      },
+      {
+        "id": "ocr-bracket-cjk",
+        "pattern": "【\\s*OCR\\s*】",
+        "flags": ["IGNORECASE"],
+        "description": "中文方括号 OCR 标记残留（如【OCR】）",
+        "suggested_action": "对照原始文档，将 OCR 标记替换为真实内容，或删除该标记。"
+      },
+      {
+        "id": "ocr-image-placeholder",
+        "pattern": "(?<!!)\\[\\s*(?:图片|图像|插图|照片|示意图)\\s*[^\\]]{0,20}\\](?!\\()",
+        "description": "图片占位标记残留（如 [图片]、[插图：安装图]；不匹配 ![...](...) 图片引用与 [...] (...) 链接语法）",
+        "suggested_action": "对照原始文档补回真实图片引用，或删除该占位标记。"
+      },
+      {
+        "id": "ocr-table-placeholder",
+        "pattern": "(?<!!)\\[\\s*表格\\d*\\s*\\](?!\\()",
+        "description": "表格占位标记残留（如 [表格]、[表格1]）",
+        "suggested_action": "对照原始文档补回真实表格内容，或删除该占位标记。"
+      },
+      {
+        "id": "ocr-formula-placeholder",
+        "pattern": "(?<!!)\\[\\s*公式\\d*\\s*\\](?!\\()",
+        "description": "公式占位标记残留（如 [公式]、[公式2]）",
+        "suggested_action": "对照原始文档补回真实公式内容，或删除该占位标记。"
+      },
+      {
+        "id": "ocr-illegible",
+        "pattern": "\\[?\\s*(?:无法识别|看不清|模糊不清|字迹不清)\\s*\\]?",
+        "description": "OCR 无法识别内容的标注残留",
+        "suggested_action": "对照原始文档人工补录该处内容。"
+      }
+    ],
+    "placeholders": [
+      {
+        "id": "todo",
+        "pattern": "\\bTODO\\b",
+        "flags": ["IGNORECASE"],
+        "description": "TODO 占位符",
+        "suggested_action": "确认该处是有意留待补充，还是转写时遗漏了内容；必要时对照原始文档补全。"
+      },
+      {
+        "id": "fixme",
+        "pattern": "\\bFIXME\\b",
+        "flags": ["IGNORECASE"],
+        "description": "FIXME 占位符",
+        "suggested_action": "确认该处是有意留待修正，还是转写时遗漏了内容；必要时对照原始文档补全。"
+      },
+      {
+        "id": "tbd",
+        "pattern": "\\bTBD\\b",
+        "flags": ["IGNORECASE"],
+        "description": "TBD（待定）占位符",
+        "suggested_action": "确认该处取值是否待定；如为转写遗漏，请对照原始文档补全。"
+      },
+      {
+        "id": "wait-supplement",
+        "pattern": "待补充",
+        "description": "“待补充”占位文本",
+        "suggested_action": "确认该处是有意留空还是内容缺失；必要时对照原始文档补全。"
+      },
+      {
+        "id": "wait-perfect",
+        "pattern": "待完善",
+        "description": "“待完善”占位文本",
+        "suggested_action": "确认该处是有意留空还是内容缺失；必要时对照原始文档补全。"
+      },
+      {
+        "id": "omitted-here",
+        "pattern": "此处省略",
+        "description": "“此处省略”占位文本",
+        "suggested_action": "确认省略是否有意为之；如需完整转写，请对照原始文档补全。"
+      },
+      {
+        "id": "placeholder-tag",
+        "pattern": "【\\s*占位\\s*】",
+        "description": "【占位】标记",
+        "suggested_action": "替换为真实内容或删除该标记。"
+      },
+      {
+        "id": "lorem-ipsum",
+        "pattern": "lorem\\s+ipsum",
+        "flags": ["IGNORECASE"],
+        "description": "lorem ipsum 假文本",
+        "suggested_action": "替换为真实内容；该文本为占位用的假文本，不应出现在正式知识库中。"
+      }
+    ],
+    "mojibake": [
+      {
+        "id": "gbk-mojibake",
+        "pattern": "锟斤拷|锟斤|烫烫烫|屯屯屯",
+        "description": "GBK/UTF-8 编码转换乱码特征字符",
+        "suggested_action": "该文本在编码转换中已损坏，需从原始文档重新转写此段内容。"
+      },
+      {
+        "id": "utf8-as-latin1",
+        "pattern": "ä¸­|ä¸€|æ–‡|æ˜¯|çš„|åž‹|ã€",
+        "description": "UTF-8 被误按 Latin-1 解码的常见乱码特征（如“中/一/文/是/的/型/，”损坏后的形态）",
+        "suggested_action": "该文本疑似用错误编码打开过，需按正确编码（UTF-8）重新转写此段内容。"
+      }
+    ]
+  }
+}

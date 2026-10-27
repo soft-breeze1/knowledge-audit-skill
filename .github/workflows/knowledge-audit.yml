@@ -1,0 +1,47 @@
+name: knowledge-audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 校验 SKILL.md 与两个发现目录一致
+        run: python scripts/sync_skill.py --check
+
+      - name: 用内置演示语料跑完整流水线
+        run: python scripts/run_all.py input/
+
+      - name: 校验交付文件数量（2 HTML + 2 XLSX）
+        shell: python
+        run: |
+          from pathlib import Path
+          run_dir = sorted(Path("output").glob("2026*"))[-1]
+          files = sorted(p.name for p in run_dir.iterdir() if p.is_file())
+          assert len(files) == 4, files
+          assert sum(name.endswith(".html") for name in files) == 2, files
+          assert sum(name.endswith(".xlsx") for name in files) == 2, files
+          print("交付目录:", run_dir, files)
+
+      - name: 上传报告（便于在 Actions 页面直接下载查看）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: knowledge-audit-reports-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: output/*/
+          if-no-files-found: warn
