@@ -42,13 +42,27 @@ def annotate(level: str, message: str) -> None:
     safe_print(f"::{level}::{escape_command_value(message)}")
 
 
+def run_dir_sort_key(path: Path) -> Tuple[str, int]:
+    """运行目录排序键：先按时间戳，再按同名后缀的数字大小。
+
+    目录名形如 ``20261026-153012`` 或同名冲突时的 ``20261026-153012_2`` / ``_10``。
+    直接按字符串排序会把 ``_10`` 排在 ``_2`` 前面（字典序），导致“最新运行目录”判错；
+    这里把后缀解析成整数比较，保证 ``_10`` 晚于 ``_2``。
+    """
+    base, sep, suffix = path.name.partition("_")
+    return (base, int(suffix) if sep and suffix.isdigit() else 0)
+
+
 def find_run_dirs(output_root: Path) -> List[Path]:
-    """返回输出根目录下的运行目录，按名称升序（时间戳的字典序即时间序）。"""
+    """返回输出根目录下的运行目录，按时间戳、再按同名后缀数字升序排序。"""
     try:
         entries = list(output_root.iterdir())
     except OSError:
         return []
-    return sorted(path for path in entries if path.is_dir() and RUN_DIR_RE.match(path.name))
+    return sorted(
+        (path for path in entries if path.is_dir() and RUN_DIR_RE.match(path.name)),
+        key=run_dir_sort_key,
+    )
 
 
 def inspect(run_dir: Path, expect_html: int, expect_xlsx: int) -> Tuple[List[str], List[str]]:

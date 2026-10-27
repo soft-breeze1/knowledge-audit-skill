@@ -632,7 +632,7 @@ def build_extraction(
     reverse_alias = build_reverse_alias_map(rules)
     value_regex = build_value_regex(rules)
     files = collect_files(input_path, output_dir or input_path, report_base_name)
-    bar = Progress("属性抽取", len(files), enabled=show_progress)
+    bar = Progress("属性抽取", len(files), enabled=None if show_progress else False)
     entries: List[Dict[str, Any]] = []
     for index, fp in enumerate(files, 1):
         entry = extract_from_file(fp, relative_path(fp, input_path), rules, value_regex, reverse_alias)

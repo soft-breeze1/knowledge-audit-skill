@@ -1,3 +1,0 @@
-# knowledge-audit-skill 运行依赖
-#
-# 全部功能仅使用 Python 标准库（要求 Python 3.9+），无需执行 pip install 安装任何第三方包。

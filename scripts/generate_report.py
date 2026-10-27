@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-TOOL_VERSION = "1.0.3"
+TOOL_VERSION = "1.0.4"
 
 
 def now_utc_iso() -> str:
@@ -406,7 +406,14 @@ class Progress:
         self.label = label
         self.total = max(0, int(total or 0))
         self.stream = stream or sys.stdout
-        self.enabled = progress_enabled(self.stream, enabled)
+        # enabled 三态：None=自动（交互终端显示动态条，重定向 / CI 降级为分段整行日志）；
+        #              True=强制动态条；False=完全关闭（不打印任何进度）。
+        if enabled is False:
+            self.quiet = True
+            self.enabled = False
+        else:
+            self.quiet = False
+            self.enabled = progress_enabled(self.stream, enabled)
         self.log_step = max(1, int(log_step))
         columns = shutil.get_terminal_size((120, 25)).columns
         self.width = max(10, min(32, int(width) if width else columns - 62))
@@ -455,6 +462,8 @@ class Progress:
 
     def update(self, done: int, detail: str = "", extra: str = "") -> None:
         """推进进度：``done`` 为已完成数量，``detail`` 为当前处理项，``extra`` 为附加说明。"""
+        if self.quiet:
+            return
         self.done = max(0, int(done))
         if extra:
             self._last_tail = extra
@@ -479,17 +488,13 @@ class Progress:
 
     def finish(self, detail: str = "", extra: str = "") -> None:
         """收尾：打印最终行（交互终端补换行，保证后续输出不会被覆盖）。"""
+        if self.quiet:
+            return
         line = self._line(self.done, detail if not extra else "", extra or detail or self._last_tail, final=True)
         if self.enabled:
             self._write("\r" + line + "\n")
         else:
             self._write(line, newline=True)
-
-    def __enter__(self) -> "Progress":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        self.finish()
 
 
 def safe_print(message: str) -> None:

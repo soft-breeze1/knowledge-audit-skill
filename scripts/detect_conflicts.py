@@ -41,7 +41,6 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from generate_report import (  # noqa: E402
     TOOL_VERSION,
-    Progress,
     make_timestamped_dir,
     now_local_str,
     now_utc_iso,

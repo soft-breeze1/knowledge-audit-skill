@@ -205,7 +205,8 @@ def looks_like_error_body(text: str) -> str:
 
     知识库接口出错时可能返回 HTTP 200 + JSON / HTML 报错页；若原样写盘，会把“接口错误”当成正文
     混进审查语料、污染质量报告，因此在写入前做一次廉价校验（``--keep-raw-content`` 可关闭该校验）。
-    判定保持保守：只拦截整篇就是报错 JSON（顶层键全部落在可疑键集合内）或以 ``<html`` 等开头的页面。
+    判定保持保守：只拦截整篇就是报错 JSON（顶层键落在可疑键集合内、且**没有**成功标记）或以
+    ``<html`` 等开头的页面；带 ``data`` 载荷或 ``code=0/status=200/success=true`` 的正常响应不会被误判。
     """
     stripped = text.lstrip()
     if not stripped:
@@ -221,7 +222,14 @@ def looks_like_error_body(text: str) -> str:
         if isinstance(payload, dict) and payload:
             keys = {str(key).lower() for key in payload}
             failed = payload.get("success") is False or bool(payload.get("error")) or bool(payload.get("errors"))
-            if failed or keys <= _ERROR_BODY_KEYS:
+            # 正常载荷常以 data 承载正文并带 code=0 / status=200 / success=true；这类不应误判为报错体。
+            # 兜底判据「顶层键全落在可疑键集合内」只在明确不是成功响应时才成立，并排除 data 键。
+            ok_values = (
+                payload.get("success") is True
+                or payload.get("code") in (0, "0", 200, "200")
+                or payload.get("status") in (0, "0", 200, "200", "ok", "success")
+            )
+            if failed or (not ok_values and keys <= (_ERROR_BODY_KEYS - {"data"})):
                 return "JSON 报错体（" + "、".join(sorted(keys)[:4]) + "）"
     return ""
 
@@ -480,10 +488,6 @@ class KnowledgeClient:
             candidates.sort(key=lambda item: 0 if item[0] == self._content_branch else 1)
         return candidates
 
-    def content_url_candidates(self, raw_path: str) -> List[str]:
-        """候选正文 URL（只给地址字符串，便于排障与自测）。"""
-        return [url for _branch, url in self._content_url_candidates(raw_path)]
-
     def get_content(self, version: Dict[str, Any]) -> str:
         """取某个版本的正文（已转写好的 Markdown）。
 
@@ -715,7 +719,7 @@ def fetch_documents(
     tasks: List[Tuple[str, Path, str]] = []
     reached_limit = False
     offset = 0
-    bar = Progress("列表遍历", 0, enabled=show_progress)
+    bar = Progress("列表遍历", 0, enabled=None if show_progress else False)
     while True:
         page = client.list_assets(offset, page_size, workspace_id)
         if not total_count:
@@ -763,7 +767,7 @@ def fetch_documents(
     # ---- 步骤 2：并发抓取正文，再按列表顺序统一计数（结果确定、可复现）----
     refetched = 0
     if tasks:
-        bar2 = Progress("正文抓取", len(tasks), enabled=show_progress)
+        bar2 = Progress("正文抓取", len(tasks), enabled=None if show_progress else False)
         outcomes, refetched = _run_fetch_tasks(
             client, tasks, max_file_size, worker_count, retries, bar2
         )

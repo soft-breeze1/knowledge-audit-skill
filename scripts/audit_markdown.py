@@ -12,7 +12,7 @@
     编码可解码性（UTF-8） / 替换字符 U+FFFD / 编码乱码特征 / OCR 标记残留 / 占位符文本 / 空文件检测
 
 每处问题都能定位到“文件 + 行号 + 证据原文”；文件读取失败、超过单文件大小上限属“漏审风险”，
-不算质量问题，只在本工具的控制台输出中提示。全流程不生成 Markdown / JSON 文件。
+不算质量问题，仅在控制台提示并列入 HTML 报告的运行信息。全流程不生成 Markdown / JSON 文件。
 
 用法：
     python scripts/audit_markdown.py input/
@@ -82,7 +82,7 @@ SHEET_WIDTHS: Tuple[int, ...] = (36, 8, 30, 46, 46, 40)
 SHEET_NUMERIC_COLS: Tuple[int, ...] = (1,)  # 行号按数字右对齐
 
 # 检查口径：固定 6 项检查，分类即检查项（报告与清单表格的「问题类型」就是这里的名称）——
-# 6 项全部计入「存在问题文件数 / 问题总数」；结构类写法不上报，读取失败 / 超限属“漏审风险”，只在控制台提示。
+# 6 项全部计入「存在问题文件数 / 问题总数」；结构类写法不上报，读取失败 / 超限属“漏审风险”，只在控制台提示并列入报告运行信息。
 CHECK_ITEMS: Tuple[Tuple[str, str, str], ...] = (
     (
         "encoding_error",
@@ -118,8 +118,6 @@ CHECK_ITEMS: Tuple[Tuple[str, str, str], ...] = (
 
 # 检查项名称（报告与清单表格的「问题类型」列直接用这个名称）
 CHECK_NAMES: Dict[str, str] = {type_id: name for type_id, name, _desc in CHECK_ITEMS}
-# 检查项展示名（别名，供报告与清单表格统一取值）
-CHECK_CATALOG: Dict[str, str] = dict(CHECK_NAMES)
 
 
 def checks_summary() -> str:
@@ -152,7 +150,7 @@ class Issue:
             "file_path": self.file_path,
             "absolute_path": self.absolute_path,
             "issue_type": self.issue_type,
-            "issue_type_label": CHECK_CATALOG.get(self.issue_type, self.issue_type),
+            "issue_type_label": CHECK_NAMES.get(self.issue_type, self.issue_type),
             "line_number": self.line_number,
             "evidence": self.evidence,
             "explanation": self.explanation,
@@ -168,7 +166,7 @@ class FileResult:
     rel_path: str
     size: int = 0
     issues: List[Issue] = field(default_factory=list)
-    skipped: bool = False  # 因超大/不可读而跳过内容级检查（不进报告，只在控制台提示）
+    skipped: bool = False  # 因超大/不可读而跳过内容级检查（不进问题统计，只在控制台提示并列入报告运行信息）
     skip_reason: str = ""
 
 
@@ -430,7 +428,7 @@ def scan_file(
         return result
 
     # --- 读取与编码检查 ---
-    # 读取失败 / 超过单文件大小上限 = “漏审风险”，不是质量问题：不写入报告，只在控制台提示（见 run()）。
+    # 读取失败 / 超过单文件大小上限 = “漏审风险”，不是质量问题：不计入统计，只在控制台提示并列入报告运行信息（见 run()）。
     try:
         result.size = path.stat().st_size
     except OSError as exc:
@@ -700,6 +698,10 @@ def build_report_data(
             }
         )
 
+    skipped_info: List[Dict[str, str]] = [
+        {"file_path": fr.rel_path, "reason": fr.skip_reason} for fr in results if fr.skipped
+    ]
+
     data: Dict[str, Any] = {
         "tool": TOOL_NAME,
         "version": TOOL_VERSION,
@@ -728,8 +730,8 @@ def build_report_data(
                 "不在检查口径内，不作问题上报。",
                 "表格与代码块不做结构检查，但其中的文本仍按上列检查项逐行检查；代码块内部只检查"
                 "替换字符与编码乱码特征（避免把示例代码误报为占位符 / OCR 标记）。",
-                "读取失败或超过单文件大小上限的文件属于“漏审风险”，不是质量问题：不写入本报告，"
-                "只在本工具的控制台输出中列出。",
+                "读取失败或超过单文件大小上限的文件属于“漏审风险”，不是质量问题：不计入"
+                "「存在问题文件数 / 问题总数」，其数量与文件名在“五、附：本次运行信息”中列出，便于人工补审。",
                 "本工具只读 Markdown 文本，不读取、不对照原始文档（DOCX/PDF/图片）；"
                 "无法仅凭文本确认的问题在“说明”中如实写明，不作武断结论。",
                 "高频同一型问题（如替换字符成批出现）在 HTML 报告中按类型聚合呈现，并附行号汇总，"
@@ -737,6 +739,8 @@ def build_report_data(
             ],
         },
         "files_scanned": len(results),
+        "files_skipped": len(skipped_info),
+        "skipped_files": skipped_info,
         "files_with_issues": sum(1 for fr in results if fr.issues),
         "issues_total": len(all_issues),
         "issues_by_type": by_type,
@@ -764,7 +768,7 @@ def build_sheet_rows(data: Dict[str, Any]) -> List[Tuple[Any, ...]]:
             (
                 issue.get("file_path") or "",
                 issue.get("line_number") if issue.get("line_number") else "",
-                CHECK_CATALOG.get(issue_type, issue_type),
+                CHECK_NAMES.get(issue_type, issue_type),
                 issue.get("explanation") or "",
                 issue.get("evidence") or "",
                 issue.get("suggested_action") or "",
@@ -831,7 +835,7 @@ def render_html_report(data: Dict[str, Any]) -> str:
         )
         note_parts: List[str] = []
         if noise_types:
-            labels = "、".join(CHECK_CATALOG.get(t, t) for t in data["noise_issue_types"])
+            labels = "、".join(CHECK_NAMES.get(t, t) for t in data["noise_issue_types"])
             note_parts.append(f"高频同一型问题（按类型聚合呈现，给数量与行号汇总）：{labels}。")
         sections.append(section("二、问题分布", body, "".join(note_parts) or None))
 
@@ -840,7 +844,7 @@ def render_html_report(data: Dict[str, Any]) -> str:
             file_total = sum(len(v) for v in groups.values())
             inner: List[str] = []
             for type_id, issues in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0])):
-                label = CHECK_CATALOG.get(type_id, type_id)
+                label = CHECK_NAMES.get(type_id, type_id)
                 if type_id in noise_types:
                     inner.append(
                         f'<div class="note"><span class="badge warn">{esc(label)}</span> '
@@ -900,25 +904,30 @@ def render_html_report(data: Dict[str, Any]) -> str:
         )
     )
 
-    # 五、附：本次运行信息（输入路径、生成时间、规则来源、检查范围）
+    # 五、附：本次运行信息（输入路径、生成时间、规则来源、检查范围、漏审风险）
+    info_rows: List[Tuple[str, str]] = [
+        ("输入路径", data["input"]),
+        ("生成时间", data["generated_at_local"]),
+        ("规则来源", data["rules_source"]),
+        (
+            "检查范围",
+            f"扩展名 {'、'.join(scope['extensions'])}；递归扫描；"
+            f"单文件上限 {scope['max_file_size_bytes']} 字节",
+        ),
+    ]
+    if data.get("files_skipped"):
+        skip_names = "；".join(
+            f"{s['file_path']}（{s['reason']}）" for s in data["skipped_files"]
+        )
+        info_rows.append(
+            ("漏审风险", f"{data['files_skipped']} 个文件未做内容级检查（不计入质量问题）：{skip_names}")
+        )
     sections.append(
         section(
             "五、附：本次运行信息",
-            table(
-                ["项目", "说明"],
-                [
-                    ("输入路径", data["input"]),
-                    ("生成时间", data["generated_at_local"]),
-                    ("规则来源", data["rules_source"]),
-                    (
-                        "检查范围",
-                        f"扩展名 {'、'.join(scope['extensions'])}；递归扫描；"
-                        f"单文件上限 {scope['max_file_size_bytes']} 字节",
-                    ),
-                ],
-                align=["", ""],
-            ),
-            "输入路径为绝对路径，可据此确认本次扫描的语料；单文件上限用于避免超大文件拖慢审查。",
+            table(["项目", "说明"], info_rows, align=["", ""]),
+            "输入路径为绝对路径，可据此确认本次扫描的语料；单文件上限用于避免超大文件拖慢审查。"
+            "读取失败 / 超限的文件仅列为“漏审风险”，不影响问题统计。",
         )
     )
     return build_html(
@@ -1020,7 +1029,7 @@ def run(argv: Optional[List[str]] = None) -> int:
     if not files:
         safe_print(f"[提示] 未在 {input_path} 下找到可处理的 {'/'.join(SUPPORTED_EXTENSIONS)} 文件。")
 
-    bar = Progress("质量审查", len(files), enabled=not args.no_progress)
+    bar = Progress("质量审查", len(files), enabled=None if not args.no_progress else False)
     results: List[FileResult] = []
     issues_seen = 0
     for index, fp in enumerate(files, 1):
@@ -1030,11 +1039,11 @@ def run(argv: Optional[List[str]] = None) -> int:
         bar.update(index, detail=result.rel_path, extra=f"已发现 {issues_seen:,} 处问题")
     bar.finish(extra=f"检查 {len(files):,} 个文件，发现 {issues_seen:,} 处问题")
 
-    # 漏审风险提示：读取失败 / 超过大小上限的文件不做内容级检查，不计入质量问题，也不写入报告
+    # 漏审风险提示：读取失败 / 超过大小上限的文件不做内容级检查，不计入质量问题，仅在控制台提示并列入 HTML 报告运行信息
     skipped = [fr for fr in results if fr.skipped]
     if skipped:
         safe_print(
-            f"[audit_markdown] 漏审风险提示：{len(skipped)} 个文件未做内容级检查（不计入质量问题、不写入报告）："
+            f"[audit_markdown] 漏审风险提示：{len(skipped)} 个文件未做内容级检查（不计入质量问题，仅在控制台提示并列入报告运行信息）："
         )
         for fr in skipped:
             safe_print(f"[audit_markdown]   - {fr.rel_path}：{fr.skip_reason}")
