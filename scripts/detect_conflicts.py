@@ -41,6 +41,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from generate_report import (  # noqa: E402
     TOOL_VERSION,
+    Progress,
     make_timestamped_dir,
     now_local_str,
     now_utc_iso,
@@ -413,6 +414,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="属性别名与单位规则 JSON（默认：项目内 rules/attribute_aliases.json）",
     )
+    parser.add_argument("--no-progress", action="store_true", help="关闭进度条（默认在交互式终端显示）")
     return parser
 
 
@@ -435,7 +437,11 @@ def run(argv: Optional[List[str]] = None) -> int:
     rules_path = Path(args.alias_rules).expanduser() if args.alias_rules else None
     try:
         extraction = build_extraction(
-            input_path, rules_path, output_dir=output_dir, report_base_name=DEFAULT_REPORT_BASE_NAME
+            input_path,
+            rules_path,
+            output_dir=output_dir,
+            report_base_name=DEFAULT_REPORT_BASE_NAME,
+            show_progress=not args.no_progress,
         )
     except (OSError, ValueError) as exc:
         safe_print(f"[错误] {exc}")

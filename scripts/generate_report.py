@@ -13,7 +13,9 @@
 from __future__ import annotations
 
 import re
+import shutil
 import sys
+import time
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -325,6 +327,169 @@ def count_by(values: Iterable[Any]) -> Dict[str, int]:
         key = str(v)
         result[key] = result.get(key, 0) + 1
     return result
+
+
+# --------------------------------------------------------------------------- 进度显示
+# 纯标准库进度条：交互终端原地刷新一行，重定向 / CI 日志自动降级为分段整行输出；
+# 只用色块字符（█ ░）与数字，不用 ANSI 转义，旧版 Windows 控制台也能正常显示。
+_PROGRESS_FILL = "█"
+_PROGRESS_EMPTY = "░"
+_PROGRESS_MIN_INTERVAL = 0.1  # 秒：刷新节流，避免打印拖慢主流程
+_PROGRESS_LOG_STEP = 5  # 非交互终端下每完成百分之几打印一行
+_PROGRESS_LOG_EVERY_WHEN_UNKNOWN = 1000  # 总数未知（非交互终端）时每多少项打印一行
+
+
+def format_duration(seconds: float) -> str:
+    """秒 → ``HH:MM:SS``（用于进度条的已用时间与预计剩余时间）。"""
+    total = int(max(0.0, seconds))
+    return f"{total // 3600:02d}:{total % 3600 // 60:02d}:{total % 60:02d}"
+
+
+def _ensure_utf8_stdout(stream: Any = None) -> None:
+    """把输出流切到 UTF-8（中文与进度条色块字符在旧版 Windows 控制台下才不会报编码错误）。"""
+    stream = stream or sys.stdout
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        return
+    try:
+        reconfigure(encoding="utf-8", errors="replace")
+    except (ValueError, OSError):
+        pass
+
+
+def progress_enabled(stream: Any = None, override: Optional[bool] = None) -> bool:
+    """是否显示动态进度条：优先取显式设定，否则要求输出流连着交互式终端。"""
+    if override is not None:
+        return bool(override)
+    stream = stream or sys.stdout
+    isatty = getattr(stream, "isatty", None)
+    try:
+        return bool(isatty and isatty())
+    except (ValueError, OSError):
+        return False
+
+
+class Progress:
+    """终端进度条（标准库实现，可用于 7 万+ 文件的长任务，全程只占一行）。
+
+    用法::
+
+        bar = Progress("质量审查", len(files))
+        for index, fp in enumerate(files, 1):
+            ...
+            bar.update(index, detail=Path(fp).name, extra="已发现 3,201 处问题")
+        bar.finish(extra="检查 74,240 个文件，发现 3,201 处问题")
+
+    交互终端下的显示形态::
+
+        [质量审查] ██████████░░░░░░░░░░ 58.3%  43,221/74,240  剩余约 00:14:02  已发现 3,201 处问题
+
+    行为约定：
+
+    - 交互终端：``\\r`` 原地刷新同一行，``finish()`` 补一个换行；
+    - 非交互终端（重定向到文件、CI 日志）：不写 ``\\r``，每完成 ``log_step`` 个百分点打印一行；
+    - ``total`` 为 0 / None 时退化为“已完成数量 + 用时”，不显示百分比与预计剩余；
+    - 刷新有节流（默认 0.1 秒），不会因为打印而拖慢扫描；``update`` 在 100% 时不打印，
+      最终汇总行统一由 ``finish()`` 给出。
+    """
+
+    def __init__(
+        self,
+        label: str,
+        total: Optional[int] = None,
+        *,
+        stream: Any = None,
+        enabled: Optional[bool] = None,
+        width: Optional[int] = None,
+        log_step: int = _PROGRESS_LOG_STEP,
+    ):
+        self.label = label
+        self.total = max(0, int(total or 0))
+        self.stream = stream or sys.stdout
+        self.enabled = progress_enabled(self.stream, enabled)
+        self.log_step = max(1, int(log_step))
+        columns = shutil.get_terminal_size((120, 25)).columns
+        self.width = max(10, min(32, int(width) if width else columns - 62))
+        self.started = time.monotonic()
+        self.done = 0
+        self._last_flush = 0.0
+        self._last_logged = -self.log_step
+        self._last_tail = ""
+        if self.enabled:
+            _ensure_utf8_stdout(self.stream)
+
+    def _bar(self, ratio: float) -> str:
+        filled = int(round(self.width * ratio))
+        return _PROGRESS_FILL * filled + _PROGRESS_EMPTY * (self.width - filled)
+
+    def _line(self, done: int, detail: str, extra: str, final: bool) -> str:
+        elapsed = time.monotonic() - self.started
+        parts = [f"[{self.label}]"]
+        if self.total:
+            ratio = max(0.0, min(1.0, done / self.total))
+            parts.append(self._bar(ratio))
+            parts.append(f"{ratio * 100:5.1f}%  {done:,}/{self.total:,}")
+            if not final and 0 < done < self.total:
+                parts.append(f"剩余约 {format_duration(elapsed / done * (self.total - done))}")
+        else:
+            parts.append(f"已完成 {done:,} 项")
+        if final or not self.total:
+            parts.append(f"用时 {format_duration(elapsed)}")
+        tail = extra or detail
+        if tail:
+            parts.append(tail)
+        return "  ".join(parts)
+
+    def _write(self, text: str, newline: bool = False) -> None:
+        suffix = "\n" if newline else ""
+        try:
+            self.stream.write(text + suffix)
+            self.stream.flush()
+        except UnicodeEncodeError:
+            try:
+                self.stream.write(text.encode("ascii", "replace").decode("ascii") + suffix)
+            except (ValueError, OSError):
+                pass
+        except (ValueError, OSError, AttributeError):
+            pass
+
+    def update(self, done: int, detail: str = "", extra: str = "") -> None:
+        """推进进度：``done`` 为已完成数量，``detail`` 为当前处理项，``extra`` 为附加说明。"""
+        self.done = max(0, int(done))
+        if extra:
+            self._last_tail = extra
+        tail = extra or self._last_tail
+        if not self.enabled:
+            if self.total:
+                if self.done >= self.total:
+                    return  # 100% 的汇总行交给 finish()
+                ratio = self.done / self.total * 100.0
+                if ratio - self._last_logged < self.log_step:
+                    return
+                self._last_logged = ratio
+            elif self.done % _PROGRESS_LOG_EVERY_WHEN_UNKNOWN:
+                return
+            self._write(self._line(self.done, detail, tail, final=False), newline=True)
+            return
+        now = time.monotonic()
+        if self.done < self.total and now - self._last_flush < _PROGRESS_MIN_INTERVAL:
+            return
+        self._last_flush = now
+        self._write("\r" + self._line(self.done, detail, tail, final=False))
+
+    def finish(self, detail: str = "", extra: str = "") -> None:
+        """收尾：打印最终行（交互终端补换行，保证后续输出不会被覆盖）。"""
+        line = self._line(self.done, detail if not extra else "", extra or detail or self._last_tail, final=True)
+        if self.enabled:
+            self._write("\r" + line + "\n")
+        else:
+            self._write(line, newline=True)
+
+    def __enter__(self) -> "Progress":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.finish()
 
 
 def safe_print(message: str) -> None:

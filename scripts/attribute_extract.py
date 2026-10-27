@@ -26,7 +26,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from generate_report import relative_path, truncate_text  # noqa: E402
+from generate_report import Progress, relative_path, truncate_text  # noqa: E402
 from audit_markdown import RE_FENCE, collect_files, iter_table_blocks  # noqa: E402
 # 型号类属性名（命中即按型号处理，取值为原始文本而非数值）
 MODEL_ATTR_NAMES = {"型号", "产品型号", "设备型号", "销售型号", "型号规格", "机型", "model"}
@@ -616,11 +616,13 @@ def build_extraction(
     rules_path: Optional[Path] = None,
     output_dir: Optional[Path] = None,
     report_base_name: str = "",
+    show_progress: bool = True,
 ) -> Dict[str, Any]:
     """遍历输入（单个 `.md` 或目录）抽取属性记录，返回结构化结果（内存对象，供直接比对）。
 
     - rules_path 为 None 时使用项目内 rules/attribute_aliases.json；显式传入但不可用则抛异常；
-    - output_dir / report_base_name 用于扫描时排除输出目录与报告文件本身，避免把报告当输入重复抽取。
+    - output_dir / report_base_name 用于扫描时排除输出目录与报告文件本身，避免把报告当输入重复抽取；
+    - show_progress=False 关闭进度条（非交互终端会自动降级为分段整行日志）。
     """
     explicit = rules_path is not None
     if rules_path is None:
@@ -630,10 +632,13 @@ def build_extraction(
     reverse_alias = build_reverse_alias_map(rules)
     value_regex = build_value_regex(rules)
     files = collect_files(input_path, output_dir or input_path, report_base_name)
-    entries = [
-        extract_from_file(fp, relative_path(fp, input_path), rules, value_regex, reverse_alias)
-        for fp in files
-    ]
+    bar = Progress("属性抽取", len(files), enabled=show_progress)
+    entries: List[Dict[str, Any]] = []
+    for index, fp in enumerate(files, 1):
+        entry = extract_from_file(fp, relative_path(fp, input_path), rules, value_regex, reverse_alias)
+        entries.append(entry)
+        bar.update(index, detail=str(entry.get("file_path") or fp.name))
+    bar.finish(extra=f"抽取 {len(files):,} 个文件的属性记录")
     return {
         "input": str(input_path.resolve()),
         "rules_source": rules_source,

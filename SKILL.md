@@ -30,18 +30,19 @@ python scripts/run_all.py --url "https://kb.example.com/knowledge/asset" --token
 ```
 
 - 输入三选一：单个 `.md`/`.markdown` 文件、Markdown 目录（递归扫描，支持中文文件名与中文路径），或用 `--url` 指定在线知识库文档列表页地址（配合 `--token` 或环境变量 `KB_ACCESS_TOKEN`，先自动抓取再审查）；
-- 在线抓取默认只取**有效文档**（`assetType=DOCUMENT`、`lifecycleStatus=ACTIVE`、`qualityStatus=PASS`；`--any-quality` 放宽质量状态，`--all-assets` 抓取列表内**全部资产、不做任何过滤**，配合 `--limit 0` 即全量抓取），并遵循**同一文档只抓第一份**：同一 `displayPath` 只保留第一份、每份只取 `versions` 的第一个版本；抓取结果按 `displayPath` 保留目录结构写成 `.md`，默认最多 200 篇（`--limit` 可调，`0` 为不限制）；抓取结束会打印列表遍历条数、接口报告总数与各类跳过/失败计数，非文档资产（如视频、图片）通常取不到 Markdown 正文，会作为“漏取风险”在控制台列出；
+- 在线抓取默认只取**有效文档**（`assetType=DOCUMENT`、`lifecycleStatus=ACTIVE`、`qualityStatus=PASS`；`--any-quality` 放宽质量状态，`--all-assets` 抓取列表内**全部资产、不做任何过滤**，配合 `--limit 0` 即全量抓取），并遵循**同一文档只抓第一份**：同一 `displayPath` 只保留第一份、每份只取 `versions` 的第一个版本；抓取结果按 `displayPath` 保留目录结构写成 `.md`，默认最多 200 篇（`--limit` 可调，`0` 为不限制）；抓取结束会打印列表遍历条数、接口报告总数与各类跳过/失败计数，非文档资产（如视频、图片）通常取不到 Markdown 正文，会作为“漏取风险”在控制台列出；在线抓取**开箱即用、不需要改本机任何设置**：`--workers`（默认 8）并发取正文，而列表顺序与「同一文档只抓第一份」的判定仍在单线程里完成，因此结果与单线程完全一致；默认**断点续跑**（本地已抓到的不再重复请求，中断后重跑只补缺口，`--overwrite` 强制重抓）；单个请求瞬断自动退避重试（`--retries`，默认 3 次），抓取结束后还会对仍失败的文档补抓若干轮——个别文档取不到不会让后续审查停摆（只有“一篇都没抓到”才中止；要“任一漏取即中止”可加 `--strict-fetch`）；默认自动探测「直连 / 系统代理」并选更快的那个（**不需要配置 `no_proxy` 等环境变量**，`--proxy` 可指定）；版本里的 `filePath` 自动归一化（完整 URL / 站点绝对路径 / 已含接口前缀 / 相对路径都能取到）；写入前拒收 JSON / HTML 接口报错体（`--keep-raw-content` 关闭校验），避免把接口错误当成正文污染审查语料；
 - 每次运行在 `--output`（默认 `output`）下**新建带完整时间戳的子目录**（`YYYYMMDD-HHMMSS`，如 `output/20261023-160033/`），交付文件全部写入其中；用 `--url` 在线抓取的 Markdown 属**输入缓存**，写入 `<输出根目录>/_kb_source/<时间戳>/`，与交付目录分开、不计入交付文件；控制台开头会打印**输入路径**、**交付目录**与匹配到的 Markdown **文件数**，报告文末「附：本次运行信息」里的「输入路径」也是绝对路径，可据此确认报告来自哪个语料；
-- 依次执行：转写质量审查 → 同一型号属性冲突比对；任一步骤失败即中止（已生成的报告仍可查看）；
+- 依次执行：转写质量审查 → 同一型号属性冲突比对；任一步骤失败即中止（已生成的报告仍可查看）；三个阶段（在线抓取、质量审查、属性抽取/冲突比对）在交互式终端都会显示**进度条**（进度条 + 已完成/总数 + 百分比 + 预计剩余时间 + 当前文件），输出重定向到文件或 CI 日志时自动降级为每 5% 打印一行，不刷屏；
 - 交付文件共 4 个：质量审查的 `知识库文档解析与转写质量问题报告.html/.xlsx` 与冲突审查的 `知识库同类属性冲突审查报告.html/.xlsx`。HTML 便于阅读（质量报告按文件分组、逐条给行号与证据原文，文末附本次运行信息；冲突报告按「型号 + 属性 + 工况」列出各来源文档与取值）；**XLSX 清单表格逐行给出定位信息**（质量清单 = 文件/行号/问题类型（固定 6 项检查的检查项名称）/问题说明/证据原文/建议操作；冲突清单 = 冲突编号/型号/属性/工况/原始取值/换算后取值/文档/行号/证据原文，按「冲突编号」即可筛出同一处冲突涉及哪几个文档）。表格为开放格式、由标准库生成：**表头深蓝底白字、列宽已加宽、单元格带边框、隔行浅蓝斑马纹、首行冻结并开启自动筛选**，Excel / WPS 双击即可打开；
 - 全流程**不生成 Markdown / JSON 文件**：属性抽取结果只在内存中交给冲突比对（`rules/` 下的 JSON 是可配置的规则输入，不是输出）；
-- 常用参数：`--output`（输出根目录）、`--report-name`（报告基名）、`--rules`（文本异常规则）、`--alias-rules`（属性别名与单位规则）、`--fail-on-issue`（发现问题时退出码 3，供 CI 卡口）；在线抓取相关：`--url`（知识库文档列表页地址）、`--api-base`（接口根地址，默认站点根 + `/api/v1`，可指向自己的服务）、`--token`（或环境变量 `KB_ACCESS_TOKEN`）、`--token-header`（令牌请求头名，默认 `x-access-token`）、`--limit`（最多抓取篇数，默认 200）、`--workspace`（限定工作区，名称或 ID）、`--any-quality`（放宽质量状态）、`--all-assets`（不做任何资产过滤）、`--kb-output`（抓取目录）；
+- 常用参数：`--output`（输出根目录）、`--report-name`（报告基名）、`--rules`（文本异常规则）、`--alias-rules`（属性别名与单位规则）、`--fail-on-issue`（发现问题时退出码 3，供 CI 卡口）；在线抓取相关：`--url`（知识库文档列表页地址）、`--api-base`（接口根地址，默认站点根 + `/api/v1`，可指向自己的服务）、`--token`（或环境变量 `KB_ACCESS_TOKEN`）、`--token-header`（令牌请求头名，默认 `x-access-token`）、`--limit`（最多抓取篇数，默认 200）、`--workspace`（限定工作区，名称或 ID）、`--any-quality`（放宽质量状态）、`--all-assets`（不做任何资产过滤）、`--kb-output`（抓取目录）、`--workers`（并发线程数，默认 8，1 为单线程）、`--retries`（单请求重试次数，默认 3，抓完还会补抓若干轮）、`--proxy`（`auto`（默认，自动选更快的直连/系统代理）/ `direct` / `system` / 代理地址）、`--overwrite`（忽略本地缓存强制重抓）、`--strict-fetch`（任一文档漏取即中止流水线）、`--keep-raw-content`（不校验正文）、`--no-progress`（关闭进度条）；
 - 退出码：0=完成；1=输入/输出错误；2=规则或参数错误；3=完成但发现问题（仅 `--fail-on-issue`）。
 
 需要分步执行或单独调参时（单脚本不指定 `--output` 时同样自动新建 `output/<时间戳>/`；显式指定则直接写入该目录）：
 
 ```bash
 python scripts/fetch_knowledge.py "<知识库列表页地址>" --token "<x-access-token>" --output input/kb   # ⓪ 在线抓取（可选）
+python scripts/fetch_knowledge.py "<地址>" --token "<token>" --limit 0 --all-assets --workers 16       # ⓪′ 全量并发抓取（中断后重跑即从断点续跑）
 python scripts/audit_markdown.py input/     # ① 转写质量审查
 python scripts/detect_conflicts.py input/   # ② 同一型号属性冲突比对（内部完成规则式属性抽取）
 ```
@@ -63,6 +64,7 @@ python scripts/detect_conflicts.py input/   # ② 同一型号属性冲突比对
 ## 约束与边界
 
 - 规则可配置：`rules/ocr_patterns.json`（OCR 标记/占位符/乱码特征）、`rules/attribute_aliases.json`（属性别名、单位换算因子）；缺失时自动回退内置规则。
+- **零依赖、零配置**：只用 Python 标准库，不需要安装第三方包，也不需要改本机的代理/环境变量等设置；并发数、重试次数、断点续跑、连接方式自适应在默认值下就是“快且稳”的一组取值，需要更强一致性时再用 `--strict-fetch`、`--workers`、`--overwrite` 等参数收紧。
 - 只审查 Markdown 文本本身；输入三选一（Markdown 文件夹 / 单个 `.md` / 在线知识库文档列表页地址），**不需要原始 DOCX/PDF/图片**。给网址时由 `scripts/fetch_knowledge.py` 调用知识库接口取它**已经转写好的 Markdown**（`assets/<assetId>/versions/<assetVersionId>/content`），仍不解析原始 DOCX/PDF/图片，也不承诺“转写内容与原始文档逐字一致”这类核对结论。
 - 输入文档只读；所有输出写入 `output/` 下**本次运行的时间戳子目录**（扫描时自动排除输出目录与报告文件，不会把报告当作输入重复审查），且只有 HTML 报告与 XLSX 清单表格两类交付文件；在线抓取的 Markdown 属**输入缓存**，写入 `<输出根目录>/_kb_source/<时间戳>/`，与交付目录分开。
 - 抽取为规则式（非语义理解）；标识类字段（物料编码/零件号/序号等）、故障排查表、备件清单、版本履历表不参与抽取；同一文件内的重复表述不构成冲突，宁可少报也不误报。

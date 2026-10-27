@@ -39,6 +39,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from generate_report import (  # noqa: E402
     TOOL_VERSION,
+    Progress,
     count_by,
     make_timestamped_dir,
     now_local_str,
@@ -982,6 +983,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="发现问题时以退出码 3 退出（供 CI 卡口）",
     )
+    parser.add_argument("--no-progress", action="store_true", help="关闭进度条（默认在交互式终端显示）")
     return parser
 
 
@@ -1018,9 +1020,15 @@ def run(argv: Optional[List[str]] = None) -> int:
     if not files:
         safe_print(f"[提示] 未在 {input_path} 下找到可处理的 {'/'.join(SUPPORTED_EXTENSIONS)} 文件。")
 
-    results: List[FileResult] = [
-        scan_file(fp, relative_path(fp, input_path), rules, args.max_file_size) for fp in files
-    ]
+    bar = Progress("质量审查", len(files), enabled=not args.no_progress)
+    results: List[FileResult] = []
+    issues_seen = 0
+    for index, fp in enumerate(files, 1):
+        result = scan_file(fp, relative_path(fp, input_path), rules, args.max_file_size)
+        results.append(result)
+        issues_seen += len(result.issues)
+        bar.update(index, detail=result.rel_path, extra=f"已发现 {issues_seen:,} 处问题")
+    bar.finish(extra=f"检查 {len(files):,} 个文件，发现 {issues_seen:,} 处问题")
 
     # 漏审风险提示：读取失败 / 超过大小上限的文件不做内容级检查，不计入质量问题，也不写入报告
     skipped = [fr for fr in results if fr.skipped]
@@ -1047,6 +1055,17 @@ def run(argv: Optional[List[str]] = None) -> int:
         f"[audit_markdown] 扫描完成：检查 {data['files_scanned']} 个文件，"
         f"发现问题 {data['issues_total']} 处。"
     )
+    # 自检（对账恒等式）：报告里的文件数 / 问题数必须与本次扫描逐一相等，避免统计口径漂移
+    if data["files_scanned"] != len(results) or data["issues_total"] != issues_seen:
+        safe_print(
+            f"[audit_markdown] [自检] 统计口径异常：文件数 报告 {data['files_scanned']} 对 实际 {len(results)}、"
+            f"问题数 报告 {data['issues_total']} 对 实际 {issues_seen}，请复核报告。"
+        )
+    else:
+        safe_print(
+            f"[audit_markdown] 自检通过：文件数 {len(results):,}，问题数 {issues_seen:,}，"
+            f"跳过（未做内容级检查）{len(skipped):,} 个。"
+        )
     if args.fail_on_issue and data["issues_total"] > 0:
         safe_print("[audit_markdown] 因发现问题且指定了 --fail-on-issue，以退出码 3 结束。")
         return 3
