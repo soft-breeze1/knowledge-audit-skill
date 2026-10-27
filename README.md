@@ -173,6 +173,7 @@ cp -r .agents/skills/knowledge-audit /path/to/your-project/.agents/skills/
 | `detect_conflicts.py` | `input`、`--output`、`--alias-rules`、`--no-progress` |
 | `fetch_knowledge.py` | `url`、`--api-base`、`--token`、`--token-header`、`--limit`、`--workspace`、`--any-quality`、`--all-assets`、`--max-file-size`、`--timeout`、`--output`、`--workers`、`--retries`、`--proxy`、`--overwrite`、`--keep-raw-content`、`--no-progress` |
 | `sync_skill.py` | `--check`（仅校验 `SKILL.md` 副本一致性） |
+| `check_deliverables.py` | `--output`、`--expect-html`、`--expect-xlsx`（校验运行目录里是 2 HTML + 2 XLSX，CI 与本地自检共用） |
 
 ### 退出码
 
@@ -285,13 +286,14 @@ knowledge-audit-skill/
 
 ## 在 CI 中使用
 
-`--fail-on-issue` 把“发现问题”变成可卡口的构建失败。仓库内置一份开箱可用的 workflow（[`.github/workflows/knowledge-audit.yml`](.github/workflows/knowledge-audit.yml)）：在 Ubuntu / Windows × Python 3.9 / 3.12 上跑内置演示语料，校验 `SKILL.md` 副本一致性与交付文件数量，并上传报告作为构建产物。
+`--fail-on-issue` 把“发现问题”变成可卡口的构建失败。仓库内置一份开箱可用的 workflow（[`.github/workflows/knowledge-audit.yml`](.github/workflows/knowledge-audit.yml)）：在 Ubuntu / Windows × Python 3.9 / 3.12 上跑内置演示语料，校验 `SKILL.md` 副本一致性与交付文件数量（由 `scripts/check_deliverables.py` 校验，跨平台一致，不符时在 Actions 页面发出 `::error::` 注解），并上传报告作为构建产物。
 
 ```yaml
 - uses: actions/setup-python@v5
   with: { python-version: "3.11" }
 - run: python scripts/sync_skill.py --check
 - run: python scripts/run_all.py input/ --fail-on-issue
+- run: python scripts/check_deliverables.py
 - uses: actions/upload-artifact@v4
   if: always()
   with: { name: knowledge-audit-reports, path: output/*/ }
