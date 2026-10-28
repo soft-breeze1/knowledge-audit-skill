@@ -211,7 +211,12 @@ def crawl_online_input(args: argparse.Namespace, output_root: Path) -> Tuple[Opt
         safe_print(f"[错误] {exc}")
         return None, 2
     api_base = api_base.rstrip("/")
-    kb_dir = Path(args.kb_output).expanduser() if args.kb_output else make_timestamped_dir(output_root / "_kb_source")
+    if args.kb_output:
+        kb_dir = Path(args.kb_output).expanduser()
+    else:
+        # 固定目录（按 url 派生）而非每次新建时间戳目录：否则断点续跑永远没有可复用的历史文件、--overwrite/续跑形同虚设
+        kb_slug = hashlib.sha1((args.url or "").encode("utf-8")).hexdigest()[:8]
+        kb_dir = output_root / "_kb_source" / f"kb-{kb_slug}"
     try:
         kb_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
