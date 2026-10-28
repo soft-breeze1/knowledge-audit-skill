@@ -320,6 +320,24 @@ def truncate_text(text: Any, limit: int = 200) -> str:
     return s[:limit] + f"…（已截断，原文共 {len(s)} 字符）"
 
 
+def window_text(text: Any, start: int, end: int, radius: int = 60) -> str:
+    """以 ``[start, end)`` 为中心截取文本窗口（两侧各 ``radius`` 字符，超出部分标省略号）。
+
+    用于“证据原文”定位：长行里命中位置靠后时，只截行首会把出问题的那段文字截掉，
+    证据里看不到关键内容；以命中处为中心截取可保证“证据一定包含问题本身”。
+    """
+    s = "" if text is None else str(text)
+    total = len(s)
+    if total == 0:
+        return ""
+    start = max(0, min(int(start), total))
+    end = max(start, min(int(end), total))
+    left = max(0, start - radius)
+    right = min(total, end + radius)
+    window = s[left:right]
+    return f"{'…' if left > 0 else ''}{window}{'…' if right < total else ''}"
+
+
 def count_by(values: Iterable[Any]) -> Dict[str, int]:
     """统计可迭代对象中各值出现的次数（键统一转为字符串）。"""
     result: Dict[str, int] = {}
