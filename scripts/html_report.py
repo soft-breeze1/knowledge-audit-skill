@@ -42,17 +42,19 @@ header.page p{margin:0;opacity:.92;font-size:13.5px}
 .kpi .v{font-size:22px;font-weight:600;letter-spacing:.4px}
 .kpi.warn .v{color:var(--warn)} .kpi.ok .v{color:var(--ok)} .kpi.hot .v{color:var(--accent)}
 section.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
-  padding:18px 20px;margin:16px 0;box-shadow:0 1px 2px rgba(16,24,40,.04)}
-section.card>h2{margin:0 0 4px;font-size:17px}
+  padding:18px 20px;margin:16px 0;box-shadow:0 1px 2px rgba(16,24,40,.04);overflow-x:auto}
+section.card>h2{margin:0 0 4px;font-size:17px;border-left:4px solid var(--accent);padding-left:10px}
 section.card .note{color:var(--muted);font-size:12.5px;margin:2px 0 12px}
 table{border-collapse:collapse;width:100%;font-size:13.5px;margin:6px 0 2px}
 th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top;word-break:break-word}
 th{background:#f8fafc;font-weight:600;white-space:nowrap}
 tr:nth-child(even) td{background:#fcfdfe}
+tbody tr:hover td{background:var(--accent-soft)}
 table td.num,table th.num{text-align:right;white-space:nowrap}
 details{border:1px solid var(--line);border-radius:10px;margin:8px 0;background:#fff}
 details>summary{cursor:pointer;padding:9px 12px;font-weight:600;font-size:13.5px;
-  list-style:none;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  list-style:none;display:flex;gap:8px;align-items:center;flex-wrap:wrap;transition:background .15s}
+details>summary:hover{background:#f8fafc}
 details>summary::-webkit-details-marker{display:none}
 details>summary::before{content:"▸";color:var(--muted);font-size:12px}
 details[open]>summary::before{content:"▾"}

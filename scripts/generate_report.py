@@ -142,7 +142,7 @@ def _styles_xml() -> str:
             '<fonts count="2">',
             f'<font><sz val="10.5"/><color rgb="FF1F2937"/><name val="{_FONT_NAME}"/>'
             '<charset val="134"/></font>',
-            f'<font><b/><sz val="10.5"/><color rgb="FFFFFFFF"/><name val="{_FONT_NAME}"/>'
+            f'<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="{_FONT_NAME}"/>'
             '<charset val="134"/></font>',
             "</fonts>",
             '<fills count="4">',
@@ -203,11 +203,11 @@ def _sheet_xml(
         _XML_DECL,
         f'<worksheet xmlns="{_XLSX_NS}">',
         f'<dimension ref="A1:{last_col}{len(data_rows) + 1}"/>',
-        '<sheetViews><sheetView tabSelected="1" workbookViewId="0">'
+        '<sheetViews><sheetView tabSelected="1" workbookViewId="0" showGridLines="0">'
         '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
         '<selection pane="bottomLeft" activeCell="A2" sqref="A2"/>'
         "</sheetView></sheetViews>",
-        '<sheetFormatPr defaultRowHeight="16"/>',
+        '<sheetFormatPr defaultRowHeight="18"/>',
     ]
     if widths:
         parts.append("<cols>")
