@@ -2,7 +2,7 @@
 name: knowledge-audit
 license: MIT
 metadata:
-  version: "1.0.5"
+  version: "1.0.6"
   author: knowledge-audit-skill contributors
   compatibility: "Python 3.9+，仅标准库；Windows / macOS / Linux"
 description: 企业知识库质量审查（Agent Skill，Python 3.9+、纯标准库）。输入三选一：已转写为 Markdown 的知识库文件夹、单个 .md 文档，或在线知识库文档列表页地址（配访问令牌，自动抓取后审查）。一条命令完成两类客观审查并产出带证据定位（文件 + 行号 + 证据原文）的交付物：① 转写质量审查（固定 6 项检查：编码可解码性（UTF-8）/ 替换字符 U+FFFD / 编码乱码特征 / OCR 标记残留 / 占位符文本 / 空文件检测）；② 同一型号同类属性取值冲突检测（型号 + 属性 + 工况完全一致且证据来自 ≥2 个不同文件，支持单位换算与属性别名合并）。输出 2 份 HTML 报告 + 2 份 XLSX 清单表格（共 4 个文件，不生成 Markdown / JSON、不修改输入）。用于知识库体检、文档转写问题排查、多文档参数一致性比对。
