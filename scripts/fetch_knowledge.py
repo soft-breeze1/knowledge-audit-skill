@@ -102,6 +102,10 @@ _ERROR_BODY_KEYS = frozenset(
 )
 _HTML_ERROR_PREFIXES = ("<!doctype html", "<html", "<head", "<body", "<title")
 OUTPUT_SUBDIR = Path("output") / "_kb_source"
+# displayPath 常见的原始文档扩展名：抓取结果统一为 .md，避免出现 xxx.xlsx.md 这类双扩展名
+_DOC_SOURCE_EXTENSIONS = frozenset(
+    {".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".pdf", ".txt", ".html", ".htm", ".csv", ".rtf"}
+)
 MAX_PATH_SEGMENT = 120  # 单层目录/文件名长度上限（Windows 路径长度限制下留出余量）
 _ASSET_TYPE_FIELD, _ASSET_TYPE_VALUE = "assetType", "DOCUMENT"
 _LIFECYCLE_FIELD, _LIFECYCLE_VALUE = "lifecycleStatus", "ACTIVE"
@@ -173,7 +177,15 @@ def build_relative_path(display_path: str) -> Path:
     """知识库 ``displayPath`` → 本地相对路径（保留目录结构，文件名追加 ``.md``）。"""
     segments = [seg for seg in _RE_PATH_SEPARATORS.split(str(display_path or "")) if seg and seg not in (".", "..")]
     segments = [safe_segment(seg) for seg in (segments or ["未命名文档"])]
-    segments[-1] = f"{segments[-1]}.md"
+    last = segments[-1]
+    lower = last.lower()
+    if lower.endswith((".md", ".markdown")):
+        pass  # 已是 Markdown，保持原样
+    elif Path(last).suffix.lower() in _DOC_SOURCE_EXTENSIONS:
+        last = last[: -len(Path(last).suffix)] + ".md"  # 源扩展名替换为 .md，避免 xxx.xlsx.md
+    else:
+        last += ".md"
+    segments[-1] = last
     return Path(*segments)
 
 
@@ -403,7 +415,10 @@ class KnowledgeClient:
         try:
             payload = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise KnowledgeApiError(f"响应不是合法 JSON：{path}") from exc
+            hint = ""
+            if body.lstrip()[:1] == b"<":
+                hint = "（收到的是 HTML 页面而非接口数据，接口根可能不对——请用 --api-base 指定正确的接口前缀）"
+            raise KnowledgeApiError(f"响应不是合法 JSON：{path}{hint}") from exc
         if not isinstance(payload, dict):
             return {}
         if payload.get("success") is False:
