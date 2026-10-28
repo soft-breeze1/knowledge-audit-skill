@@ -451,9 +451,13 @@ def run(argv: Optional[List[str]] = None) -> int:
 
     data = build_report_data(input_path, extraction)
     s = data["summary"]
-    html_path = write_text_file(output_dir / f"{DEFAULT_REPORT_BASE_NAME}.html", render_html_report(data))
-    safe_print(f"[detect_conflicts] HTML 报告：{html_path}")
-    sheet_path = write_conflict_sheet(output_dir / f"{DEFAULT_REPORT_BASE_NAME}.xlsx", data)
+    # 写盘兜底：目录只读、磁盘写满、交付文件被 Excel/WPS 占用等都会抛 OSError，这里统一转成清晰错误而不是崩栈
+    try:
+        html_path = write_text_file(output_dir / f"{DEFAULT_REPORT_BASE_NAME}.html", render_html_report(data))
+        safe_print(f"[detect_conflicts] HTML 报告：{html_path}")
+        sheet_path = write_conflict_sheet(output_dir / f"{DEFAULT_REPORT_BASE_NAME}.xlsx", data)
+    except OSError as exc:
+        return print_error(f"无法写入交付文件（目录 {output_dir}）：{exc}")
     safe_print(f"[detect_conflicts] XLSX 清单表格：{sheet_path}（{s['groups_conflict']} 组相同属性但描述不一致）")
     safe_print(
         f"[detect_conflicts] 比对完成：扫描 {s['files_scanned']} 个文件，抽取数值属性记录 "

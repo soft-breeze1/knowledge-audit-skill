@@ -107,7 +107,10 @@ def run() -> int:
     run_dirs = find_run_dirs(output_root)
     if not run_dirs:
         if output_root.is_dir():
-            detail = f"{output_root} 下现有条目：{sorted(path.name for path in output_root.iterdir())}"
+            try:
+                detail = f"{output_root} 下现有条目：{sorted(path.name for path in output_root.iterdir())}"
+            except OSError as exc:
+                detail = f"无法读取目录 {output_root}：{exc}"
         else:
             detail = f"目录不存在：{output_root}"
         annotate("error", f"未找到运行目录（形如 20261026-153012 的时间戳子目录）；{detail}")
