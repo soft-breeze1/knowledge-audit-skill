@@ -242,15 +242,25 @@ SHEET_HEADER: Tuple[str, ...] = (
     "冲突编号",
     "型号",
     "属性",
-    "工况",
-    "原始取值",
-    "换算后取值",
-    "文档",
+    "描述",
+    "来源文档",
     "行号",
     "证据原文",
 )
-SHEET_WIDTHS: Tuple[int, ...] = (12, 18, 20, 20, 16, 18, 34, 8, 46)
-SHEET_NUMERIC_COLS: Tuple[int, ...] = (7,)  # 行号按数字右对齐
+SHEET_WIDTHS: Tuple[int, ...] = (12, 18, 22, 30, 34, 8, 46)
+SHEET_NUMERIC_COLS: Tuple[int, ...] = (5,)  # 行号按数字右对齐
+
+
+def _describe_value(member: Dict[str, Any]) -> str:
+    """把「原始取值 + 换算后取值」合并为一句描述；未发生单位换算时只给原始取值。"""
+    raw = str(member.get("value_raw") or "").strip()
+    canonical = member.get("canonical_value")
+    if canonical is None:
+        return raw
+    canon = f"{canonical} {member.get('canonical_unit') or ''}".strip()
+    if not raw or raw == canon:
+        return canon
+    return f"{raw}（换算后 {canon}）"
 
 
 def build_sheet_rows(data: Dict[str, Any]) -> List[Tuple[Any, ...]]:
@@ -265,18 +275,12 @@ def build_sheet_rows(data: Dict[str, Any]) -> List[Tuple[Any, ...]]:
             group["members"], key=lambda m: (str(m.get("file") or ""), m.get("line_number") or 0)
         )
         for member in members:
-            canonical = member.get("canonical_value")
-            canonical_text = (
-                "—" if canonical is None else f"{canonical} {member.get('canonical_unit') or ''}".strip()
-            )
             rows.append(
                 (
                     group["group_id"],
                     group["model"],
                     group["attribute"],
-                    group["condition"] or "无工况限定",
-                    member.get("value_raw") or "",
-                    canonical_text,
+                    _describe_value(member),
                     member.get("file") or "",
                     member.get("line_number") if member.get("line_number") else "",
                     member.get("evidence") or "",
@@ -331,33 +335,27 @@ def render_html_report(data: Dict[str, Any]) -> str:
 
     detail_blocks: List[str] = []
     for group in conflicts:
-        cond = f"工况：{group['condition']}" if group["condition"] else "无工况限定"
         rows = []
         for member in group["members"]:
-            canonical = member.get("canonical_value")
-            canonical_text = (
-                "—" if canonical is None else f"{canonical} {member.get('canonical_unit') or ''}".strip()
-            )
             rows.append(
                 [
                     member.get("file", ""),
                     member.get("line_number", ""),
-                    member.get("value_raw", ""),
-                    canonical_text,
+                    _describe_value(member),
                     member.get("evidence", ""),
                 ]
             )
         head = (
             f'<span class="badge">{esc(group["group_id"])}</span> 型号 <b>{esc(group["model"])}</b> · '
-            f'<b>{esc(group["attribute"])}</b>（{esc(cond)}）'
+            f'<b>{esc(group["attribute"])}</b>'
             f'<span class="badge mute">{len(group["members"])} 条来源</span>'
         )
         body = (
             f'<div class="note">比较口径：{esc(group["comparison_basis"])}</div>'
             + table(
-                ["来源文件", "行号", "原始取值", "换算后取值", "证据原文"],
+                ["来源文档", "行号", "描述", "证据原文"],
                 rows,
-                align=["", "num", "", "", ""],
+                align=["", "num", "", ""],
             )
         )
         detail_blocks.append(details(head, body, open_=len(conflicts) <= 5))
@@ -367,14 +365,14 @@ def render_html_report(data: Dict[str, Any]) -> str:
         section(
             "二、相同属性但描述不一致明细",
             "".join(detail_blocks),
-            f"共 {len(conflicts)} 组「相同属性但描述不一致」（按「型号 + 属性 + 工况」列出各来源文档与取值）；"
+            f"共 {len(conflicts)} 组「相同属性但描述不一致」（按「型号 + 属性」列出各来源文档与取值）；"
             "明细默认折叠，点击标题展开。逐行清单见同名 XLSX 表格文件。",
         )
     )
 
     notes = list(data.get("scope_notes", [])) + [
-        "同名清单表格（.xlsx）逐行列出每组冲突的每个来源：冲突编号、型号、属性、工况、原始取值、"
-        "换算后取值、文档、行号、证据原文；按「冲突编号」即可筛出同一处冲突涉及哪几个文档。",
+        "同名清单表格（.xlsx）逐行列出每组冲突的每个来源：冲突编号、型号、属性、描述、"
+        "来源文档、行号、证据原文；按「冲突编号」即可筛出同一处冲突涉及哪几个文档。",
     ]
     notes_html = '<ul class="plain">' + "".join(f"<li>{esc(n)}</li>" for n in notes) + "</ul>"
     sections.append(section("三、范围与限制说明", notes_html, None))
