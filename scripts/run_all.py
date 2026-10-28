@@ -16,13 +16,17 @@
 `output/_kb_source/<时间戳>/`（输入缓存，不计入交付文件）。
 
 用法：
+    python scripts/run_all.py                              # 不指定输入时默认用 input/（仓库内置演示语料）
     python scripts/run_all.py input/
     python scripts/run_all.py "D:/知识库" --output output
     python scripts/run_all.py --url "https://kb.example.com/knowledge/asset" --token <x-access-token>
     python scripts/run_all.py --url <url> --token <token> --limit 0 --all-assets   # 全量抓取后审查
     python scripts/run_all.py input/ --fail-on-issue       # 发现问题时退出码 3，便于 CI 卡口
+    python scripts/run_all.py 空目录/ --allow-empty        # 空语料也出报告（默认空输入以退出码 1 结束）
 
-退出码：0=完成；1=输入/输出错误；2=规则或参数错误；3=完成但发现问题（仅 --fail-on-issue 时）。
+退出码：0=完成；1=输入/输出错误（含“未匹配到任何 Markdown”）；2=规则或参数错误；3=完成但发现问题（仅 --fail-on-issue 时）。
+结束时会对交付目录做一次自检（复用 check_deliverables 的判定：2 个 HTML 报告 + 2 个 XLSX 清单表格），
+自检不通过只打印警告、不改变退出码。
 
 在线抓取默认开箱即用（不需要改本机任何设置）：并发抓取、断点续跑、失败自动补抓、连接方式自适应
 （不必配置 no_proxy 等环境变量）、正文错误体拒收；只有“一篇都没抓到”才中止流水线，个别文档漏取
@@ -43,9 +47,14 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import audit_markdown  # noqa: E402
+import check_deliverables  # noqa: E402
 import detect_conflicts  # noqa: E402
 import fetch_knowledge  # noqa: E402
 from generate_report import format_duration, make_timestamped_dir, safe_print  # noqa: E402
+
+DEFAULT_INPUT_DIR = "input"  # 无参运行时的默认输入目录（仓库内置演示语料就在 input/）
+EXPECT_HTML = 2  # 交付物：2 个 HTML 报告（质量审查 + 冲突审查）
+EXPECT_XLSX = 2  # 交付物：2 个 XLSX 清单表格
 
 
 def file_sha256(path: Path) -> str:
@@ -80,7 +89,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "input",
         nargs="?",
         default=None,
-        help="待审查的 Markdown 文件或目录（与 --url 二选一）",
+        help="待审查的 Markdown 文件或目录（与 --url 二选一；都不给时默认用 input/）",
     )
     parser.add_argument(
         "--url",
@@ -169,6 +178,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="在线抓取有任何一篇漏取即中止流水线（默认：漏取只提示，审查照常进行）",
     )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=fetch_knowledge.DEFAULT_TIMEOUT,
+        help=f"在线抓取接口超时秒数（默认 {fetch_knowledge.DEFAULT_TIMEOUT}）",
+    )
+    parser.add_argument(
+        "--keep-raw-content",
+        action="store_true",
+        help="在线抓取不校验正文（默认拒收 JSON / HTML 接口错误体，避免污染审查语料）",
+    )
+    parser.add_argument(
+        "--allow-empty",
+        action="store_true",
+        help="输入没匹配到任何 Markdown 时也继续生成报告（默认以退出码 1 结束，避免空语料被误读成“没问题”）",
+    )
     parser.add_argument("--no-progress", action="store_true", help="关闭进度条（默认在交互式终端显示）")
     parser.add_argument("--fail-on-issue", action="store_true", help="发现问题时以退出码 3 结束")
     return parser
@@ -204,11 +229,13 @@ def crawl_online_input(args: argparse.Namespace, output_root: Path) -> Tuple[Opt
             require_pass=not args.any_quality,
             all_assets=args.all_assets,
             max_file_size=args.max_file_size,
+            timeout=args.timeout,
             token_header=args.token_header,
             workers=args.workers,
             retries=args.retries,
             proxy=args.proxy,
             overwrite=args.overwrite,
+            keep_raw_content=args.keep_raw_content,
             show_progress=not args.no_progress,
         )
     except ValueError as exc:
@@ -235,21 +262,44 @@ def crawl_online_input(args: argparse.Namespace, output_root: Path) -> Tuple[Opt
     return kb_dir, 0
 
 
+def resolve_input(args: argparse.Namespace, output_root: Path) -> Tuple[Optional[Path], int]:
+    """确定本次运行的输入：``--url`` 先在线抓取；输入与 ``--url`` 互斥；都不给时默认用 ``input/``。"""
+    if args.url:
+        if args.input:
+            safe_print("[错误] --url 与输入路径只能二选一。")
+            return None, 2
+        return crawl_online_input(args, output_root)
+    if args.input:
+        input_path = Path(args.input).expanduser()
+    else:
+        input_path = Path(DEFAULT_INPUT_DIR).expanduser()
+        if not input_path.exists():
+            safe_print(
+                "[错误] 请给出输入：待审查的 Markdown 文件或目录，或用 --url 给出在线知识库地址"
+                f"（当前目录下也没有默认输入目录 {DEFAULT_INPUT_DIR}/）。"
+            )
+            return None, 2
+        safe_print(f"[run_all] 未指定输入，使用默认输入目录 {DEFAULT_INPUT_DIR}/。")
+    if not input_path.exists():
+        safe_print(f"[错误] 输入路径不存在：{input_path}")
+        return None, 1
+    return input_path, 0
+
+
+def check_deliverable_files(run_dir: Path) -> Tuple[List[str], List[str]]:
+    """交付物自检：复用 check_deliverables 的判定逻辑（避免两处数量口径漂移）；自检结果只提示，不改退出码。"""
+    try:
+        return check_deliverables.inspect(run_dir, EXPECT_HTML, EXPECT_XLSX)
+    except OSError as exc:
+        return [f"无法读取交付目录：{exc}"], []
+
+
 def run(argv: Optional[List[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
-    if bool(args.url) == bool(args.input):
-        safe_print("[错误] 请二选一：用 --url 给出在线知识库列表页地址，或给出本地 Markdown 文件/目录。")
-        return 2
     output_root = Path(args.output).expanduser()
-    if args.url:
-        input_path, code = crawl_online_input(args, output_root)
-        if input_path is None:
-            return code
-    else:
-        input_path = Path(args.input).expanduser()
-        if not input_path.exists():
-            safe_print(f"[错误] 输入路径不存在：{input_path}")
-            return 1
+    input_path, code = resolve_input(args, output_root)
+    if input_path is None:
+        return code
     try:
         run_dir = make_timestamped_dir(output_root)
     except OSError as exc:
@@ -260,6 +310,19 @@ def run(argv: Optional[List[str]] = None) -> int:
     safe_print(f"[run_all] 输入：{input_path.resolve()}")
     safe_print(f"[run_all] 交付目录（带完整时间戳）：{run_dir}")
     safe_print(f"[run_all] 待审查 Markdown 文件：{len(planned)} 个")
+    if not planned and not args.allow_empty:
+        # 空语料会生成“0 处问题”的报告，容易被误读成“知识库没问题”，因此默认以退出码 1 结束
+        safe_print(
+            f"[run_all] [警告] 未在 {input_path} 下匹配到任何 Markdown"
+            f"（{'/'.join(audit_markdown.SUPPORTED_EXTENSIONS)}）：空语料生成“0 处问题”的报告容易被误读为"
+            "“知识库没问题”，本次以退出码 1 结束。"
+        )
+        safe_print("[run_all] 确认要用空语料出报告时，请加 --allow-empty 重跑。")
+        try:
+            run_dir.rmdir()  # 不留空交付目录，避免干扰 check_deliverables 的“最新运行目录”判定
+        except OSError:
+            pass
+        return 1
     steps = [
         (
             "1/3 文档质量审查",
@@ -291,10 +354,22 @@ def run(argv: Optional[List[str]] = None) -> int:
             worst = 3
 
     safe_print(f"[run_all] 流水线完成，交付目录：{run_dir}")
+    problems, files = check_deliverable_files(run_dir)
+    if problems:
+        safe_print("[run_all] [警告] 交付物自检未通过：" + "；".join(problems))
+        safe_print(f"[run_all]   目录内现有文件：{files}")
+    else:
+        safe_print(
+            f"[run_all] 交付物自检通过：{len(files)} 个文件"
+            f"（{EXPECT_HTML} 个 HTML 报告 + {EXPECT_XLSX} 个 XLSX 清单表格）。"
+        )
     deliverables = sorted(fp for fp in run_dir.glob("*") if fp.is_file())
     safe_print(f"[run_all] 交付文件共 {len(deliverables)} 个（HTML 报告 + XLSX 清单表格）：")
     for fp in deliverables:
-        safe_print(f"[run_all]   {fp.name}（{fp.stat().st_size} 字节，SHA256 {file_sha256(fp)[:12]}…）")
+        try:
+            safe_print(f"[run_all]   {fp.name}（{fp.stat().st_size} 字节，SHA256 {file_sha256(fp)[:12]}…）")
+        except OSError as exc:  # 收尾统计读不到文件（被占用 / 被移走）只提示，不影响本次运行的退出码
+            safe_print(f"[run_all]   {fp.name}（无法读取文件属性：{exc}）")
     if not deliverables:
         safe_print("[run_all]   未生成交付文件，请检查输入路径与上方日志。")
     if worst == 3:
