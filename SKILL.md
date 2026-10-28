@@ -2,7 +2,7 @@
 name: knowledge-audit
 license: MIT
 metadata:
-  version: "1.0.4"
+  version: "1.0.5"
   author: knowledge-audit-skill contributors
   compatibility: "Python 3.9+，仅标准库；Windows / macOS / Linux"
 description: 企业知识库质量审查（Agent Skill，Python 3.9+、纯标准库）。输入三选一：已转写为 Markdown 的知识库文件夹、单个 .md 文档，或在线知识库文档列表页地址（配访问令牌，自动抓取后审查）。一条命令完成两类客观审查并产出带证据定位（文件 + 行号 + 证据原文）的交付物：① 转写质量审查（固定 6 项检查：编码可解码性（UTF-8）/ 替换字符 U+FFFD / 编码乱码特征 / OCR 标记残留 / 占位符文本 / 空文件检测）；② 同一型号同类属性取值冲突检测（型号 + 属性 + 工况完全一致且证据来自 ≥2 个不同文件，支持单位换算与属性别名合并）。输出 2 份 HTML 报告 + 2 份 XLSX 清单表格（共 4 个文件，不生成 Markdown / JSON、不修改输入）。用于知识库体检、文档转写问题排查、多文档参数一致性比对。
@@ -22,9 +22,10 @@ description: 企业知识库质量审查（Agent Skill，Python 3.9+、纯标准
 
 ## 执行步骤
 
-在项目根目录用 Python 3.9+ 运行（无第三方依赖）。**默认一条命令跑完整流程，全自动、无需人工介入**：
+在项目根目录用 Python 3.9+ 运行（无第三方依赖）。**默认一条命令跑完整流程，全自动、无需人工介入**（不给输入时默认用 `input/`）：
 
 ```bash
+python scripts/run_all.py                         # 零参数：默认审查 input/（仓库内置演示语料）
 python scripts/run_all.py input/
 python scripts/run_all.py --url "https://kb.example.com/knowledge/asset" --token "<x-access-token>"
 ```
@@ -35,8 +36,8 @@ python scripts/run_all.py --url "https://kb.example.com/knowledge/asset" --token
 - 依次执行：转写质量审查 → 同一型号属性冲突比对；任一步骤失败即中止（已生成的报告仍可查看）；三个阶段（在线抓取、质量审查、属性抽取/冲突比对）在交互式终端都会显示**进度条**（进度条 + 已完成/总数 + 百分比 + 预计剩余时间 + 当前文件），输出重定向到文件或 CI 日志时自动降级为每 5% 打印一行，不刷屏；
 - 交付文件共 4 个：质量审查的 `知识库文档解析与转写质量问题报告.html/.xlsx` 与冲突审查的 `知识库同类属性冲突审查报告.html/.xlsx`。HTML 便于阅读（质量报告按文件分组、逐条给行号与证据原文，文末附本次运行信息；冲突报告按「型号 + 属性 + 工况」列出各来源文档与取值）；**XLSX 清单表格逐行给出定位信息**（质量清单 = 文件/行号/问题类型（固定 6 项检查的检查项名称）/问题说明/证据原文/建议操作；冲突清单 = 冲突编号/型号/属性/工况/原始取值/换算后取值/文档/行号/证据原文，按「冲突编号」即可筛出同一处冲突涉及哪几个文档）。表格为开放格式、由标准库生成：**表头深蓝底白字、列宽已加宽、单元格带边框、隔行浅蓝斑马纹、首行冻结并开启自动筛选**，Excel / WPS 双击即可打开；
 - 全流程**不生成 Markdown / JSON 文件**：属性抽取结果只在内存中交给冲突比对（`rules/` 下的 JSON 是可配置的规则输入，不是输出）；
-- 常用参数：`--output`（输出根目录）、`--report-name`（报告基名）、`--rules`（文本异常规则）、`--alias-rules`（属性别名与单位规则）、`--fail-on-issue`（发现问题时退出码 3，供 CI 卡口）；在线抓取相关：`--url`（知识库文档列表页地址）、`--api-base`（接口根地址，默认站点根 + `/api/v1`，可指向自己的服务）、`--token`（或环境变量 `KB_ACCESS_TOKEN`）、`--token-header`（令牌请求头名，默认 `x-access-token`）、`--limit`（最多抓取篇数，默认 200）、`--workspace`（限定工作区，名称或 ID）、`--any-quality`（放宽质量状态）、`--all-assets`（不做任何资产过滤）、`--kb-output`（抓取目录）、`--workers`（并发线程数，默认 8，1 为单线程）、`--retries`（单请求重试次数，默认 3，抓完还会补抓若干轮）、`--proxy`（`auto`（默认，自动选更快的直连/系统代理）/ `direct` / `system` / 代理地址）、`--overwrite`（忽略本地缓存强制重抓）、`--strict-fetch`（任一文档漏取即中止流水线）、`--keep-raw-content`（不校验正文）、`--no-progress`（关闭进度条）；
-- 退出码：0=完成；1=输入/输出错误；2=规则或参数错误；3=完成但发现问题（仅 `--fail-on-issue`）。
+- 常用参数：`--output`（输出根目录）、`--report-name`（报告基名）、`--rules`（文本异常规则）、`--alias-rules`（属性别名与单位规则）、`--fail-on-issue`（发现问题时退出码 3，供 CI 卡口）；在线抓取相关：`--url`（知识库文档列表页地址）、`--api-base`（接口根地址，默认站点根 + `/api/v1`，可指向自己的服务）、`--token`（或环境变量 `KB_ACCESS_TOKEN`）、`--token-header`（令牌请求头名，默认 `x-access-token`）、`--limit`（最多抓取篇数，默认 200）、`--workspace`（限定工作区，名称或 ID）、`--any-quality`（放宽质量状态）、`--all-assets`（不做任何资产过滤）、`--kb-output`（抓取目录）、`--workers`（并发线程数，默认 8，1 为单线程）、`--retries`（单请求重试次数，默认 3，抓完还会补抓若干轮）、`--proxy`（`auto`（默认，自动选更快的直连/系统代理）/ `direct` / `system` / 代理地址）、`--overwrite`（忽略本地缓存强制重抓）、`--strict-fetch`（任一文档漏取即中止流水线）、`--timeout`（接口超时秒数）、`--keep-raw-content`（不校验正文）、`--allow-empty`（输入未匹配到任何 Markdown 时也出报告；默认以退出码 1 结束，避免空语料被误读成“没问题”）、`--no-progress`（关闭进度条）；
+- 退出码：0=完成；1=输入/输出错误（含“输入未匹配到任何 Markdown”，用 `--allow-empty` 可放开）；2=规则或参数错误；3=完成但发现问题（仅 `--fail-on-issue`）。结束时会对交付目录做一次自检（2 个 HTML + 2 个 XLSX），自检不通过只打印警告、不改变退出码。
 
 需要分步执行或单独调参时（单脚本不指定 `--output` 时同样自动新建 `output/<时间戳>/`；显式指定则直接写入该目录）：
 

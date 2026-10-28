@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-TOOL_VERSION = "1.0.4"
+TOOL_VERSION = "1.0.5"
 
 
 def now_utc_iso() -> str:

@@ -64,8 +64,8 @@ flowchart LR
 git clone https://github.com/soft-breeze1/knowledge-audit-skill.git
 cd knowledge-audit-skill
 
-# 一条命令跑完整流程（input/ 是内置演示语料）
-python scripts/run_all.py input/
+# 一条命令跑完整流程（不给输入时默认用 input/，即内置演示语料）
+python scripts/run_all.py
 
 # 交付在 output/<时间戳>/，打开两份 HTML 即可
 ```
@@ -74,6 +74,7 @@ python scripts/run_all.py input/
 
 ```bash
 python scripts/run_all.py input/ --fail-on-issue                  # 发现问题即以退出码 3 结束（CI 卡口）
+python scripts/run_all.py 待审目录/ --allow-empty                  # 目录里没有 Markdown 时也出报告（默认以退出码 1 结束）
 python scripts/run_all.py --url "<知识库地址>" --token "<token>"    # 在线知识库：先抓取再审查
 python scripts/run_all.py --url "<知识库地址>" --token "<token>" --limit 0 --all-assets --workers 16
 python scripts/audit_markdown.py input/                           # 只跑①转写质量审查
@@ -138,13 +139,16 @@ cp -r .agents/skills/knowledge-audit /path/to/your-project/.agents/skills/
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
-| `input` | — | 待审查的 Markdown 文件或目录（与 `--url` 二选一） |
+| `input` | `input/` | 待审查的 Markdown 文件或目录（与 `--url` 二选一；不给则默认 `input/`） |
 | `--output` | `output` | 输出根目录（每次运行在其下新建时间戳子目录） |
 | `--report-name` | `知识库文档解析与转写质量问题报告` | 质量审查报告基名 |
 | `--rules` / `--alias-rules` | `rules/ocr_patterns.json` / `rules/attribute_aliases.json` | 规则文件 |
 | `--max-file-size` | `20971520`（20 MB） | 单文件大小上限，超过则跳过内容级检查 |
 | `--fail-on-issue` | 关闭 | 发现问题时以退出码 3 结束 |
 | `--no-progress` | 关闭 | 关闭进度条 |
+| `--allow-empty` | 关闭 | 输入未匹配到任何 Markdown 时也出报告（默认以退出码 1 结束，避免空语料被误读成“没问题”） |
+
+流水线结束时会自动对交付目录做一次自检（2 个 HTML + 2 个 XLSX），自检不通过只打印警告、不改变退出码。
 
 在线抓取相关参数（`--url`、`--token`、`--api-base`、`--limit`、`--workers`、`--retries`、`--proxy`、`--all-assets`、`--overwrite`、`--strict-fetch`、`--kb-output` 等）见上方「在线抓取（可选）」。
 
@@ -163,7 +167,7 @@ cp -r .agents/skills/knowledge-audit /path/to/your-project/.agents/skills/
 | 退出码 | 含义 |
 | --- | --- |
 | `0` | 流程完成 |
-| `1` | 输入 / 输出错误（含网络与接口调用失败） |
+| `1` | 输入 / 输出错误（含网络与接口调用失败、输入未匹配到任何 Markdown） |
 | `2` | 参数或规则文件错误 |
 | `3` | 完成但发现问题（仅 `--fail-on-issue`） |
 
@@ -277,6 +281,7 @@ output/
 
 | 版本 | 解决了什么 |
 | --- | --- |
+| `1.0.5` | 异常兜底更完善（写盘失败、单个文件异常不再中断整批审查）；规则加载宽容化并在报告里写明跳过原因；证据原文以命中处为中心截取；一条命令支持零参数（默认 `input/`）与空语料门控；`sync_skill.py --check` 增加版本号一致性校验 |
 | `1.0.4` | 清理冗余代码，修复进度条与漏审风险展示，精简 SKILL 描述 |
 | `1.0.3` | 精简 README 篇幅，补充版本更迭记录 |
 | `1.0.2` | 修复 Windows 上 CI 交付文件校验失败（改用 `scripts/check_deliverables.py`） |
