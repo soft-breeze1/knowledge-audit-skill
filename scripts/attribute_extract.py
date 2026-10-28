@@ -41,7 +41,11 @@ PROSE_ATTR_WORDS = (
     "要求", "满足", "如下", "包括", "例如", "事项", "详见", "参见", "备注", "用于", "内容", "亮点", "优势", "特点",
 )
 # 表头黑名单词：版本/日期/目录/名称说明等表不是参数表（仅对无“单位”列的表生效）
-NON_ATTRIBUTE_HEADER_WORDS = ("版本", "日期", "更新", "变更", "版权", "目录", "序号", "名称", "说明", "备注")
+NON_ATTRIBUTE_HEADER_WORDS = (
+    "版本", "日期", "更新", "变更", "版权", "目录", "序号", "名称", "说明", "备注",
+    # 故障排查类表：故障代码/级别/现象/原因/处理方法等，不是可跨文档比对的参数
+    "故障", "排查", "现象", "原因", "处理", "措施",
+)
 # 型号变型词：紧跟基础型号的变型标记（ABCDEF-100 HEV 与 ABCDEF-100 不是同一台机器，必须并入型号）
 RE_MODEL_VARIANT = re.compile(
     r"^[\s\-_/]{0,2}(HEV|PHEV|EV|PRO|ECO|PLUS|LITE|STD|SMART)\b", re.IGNORECASE
@@ -56,6 +60,11 @@ RE_UNIT_LIKE_TOKEN = re.compile(
 # 标识类属性名：物料编码/零件号等属标识符，跨文档比较无意义，抽取时跳过
 IDENTIFIER_ATTR_NAMES = {
     "物料编码", "整机物料编码", "物料号", "零件号", "件号", "图号", "序号", "条码", "二维码",
+}
+# 故障排查类属性：同型号不同文档的故障代码/级别/现象天然不同，跨文档比对只会产生误报，抽取时跳过
+FAULT_ATTR_NAMES = {
+    "故障代码", "故障码", "故障级别", "故障等级", "故障现象", "故障原因", "故障描述", "故障内容",
+    "故障类型", "处理方法", "处理措施", "排查方法", "排查步骤", "解决方案",
 }
 # 说明性空话：常被误当作属性名，直接跳过
 PROSE_ATTR_NAMES = {"例如", "注意事项", "备注", "提示"}
@@ -308,6 +317,11 @@ def is_identifier_attribute(name: str) -> bool:
     return name in IDENTIFIER_ATTR_NAMES or name.endswith(("编码", "编号"))
 
 
+def is_fault_attribute(name: str) -> bool:
+    """故障排查类字段判定：故障代码/级别/现象/处理方法等不是可跨文档比对的产品参数。"""
+    return name in FAULT_ATTR_NAMES or "故障" in name
+
+
 def is_plausible_model_token(token: str) -> bool:
     """型号词合理性：须含 ≥2 个字母、非“数值+单位”写法（35mm/1.5m³）、非通用词。
 
@@ -515,7 +529,7 @@ def _handle_candidate(
     name, unit_hint = split_attribute_unit(name)
     if not unit_hint:
         unit_hint = table_unit_hint
-    if not name or is_identifier_attribute(name):
+    if not name or is_identifier_attribute(name) or is_fault_attribute(name):
         return
     value_text = (value_text or "").strip()
     # 型号类属性：取原始文本中的型号词，不做数值解析
@@ -738,7 +752,18 @@ def build_extraction(
     bar = Progress("属性抽取", len(files), enabled=None if show_progress else False)
     entries: List[Dict[str, Any]] = []
     for index, fp in enumerate(files, 1):
-        entry = extract_from_file(fp, relative_path(fp, input_path), rules, value_regex, reverse_alias)
+        rel_path = relative_path(fp, input_path)
+        try:
+            entry = extract_from_file(fp, rel_path, rules, value_regex, reverse_alias)
+        except Exception as exc:  # 单文件异常（异常字节/结构）不应中断整批抽取
+            entry = {
+                "file_path": rel_path,
+                "absolute_path": str(fp),
+                "model": None,
+                "model_source": None,
+                "decode_error": f"抽取异常（{type(exc).__name__}：{exc}），已跳过内容抽取。",
+                "attributes": [],
+            }
         entries.append(entry)
         bar.update(index, detail=str(entry.get("file_path") or fp.name))
     bar.finish(extra=f"抽取 {len(files):,} 个文件的属性记录")
