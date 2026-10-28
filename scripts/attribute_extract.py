@@ -26,7 +26,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from generate_report import Progress, relative_path, truncate_text  # noqa: E402
+from generate_report import Progress, relative_path, truncate_text, window_text  # noqa: E402
 from audit_markdown import RE_FENCE, collect_files, iter_table_blocks  # noqa: E402
 # 型号类属性名（命中即按型号处理，取值为原始文本而非数值）
 MODEL_ATTR_NAMES = {"型号", "产品型号", "设备型号", "销售型号", "型号规格", "机型", "model"}
@@ -77,23 +77,104 @@ RE_MODEL_COLON = re.compile(r"(?P<attr>型号|产品型号|设备型号|型号�
 _VALUE_TERMINATORS = "，。；、,.;:： \t（（）)】]|"
 
 
+def _clean_alias_map(raw: Any, notes: List[str]) -> Dict[str, List[str]]:
+    """别名表归一化：值写成单个字符串（如 ``"整机重量"``）也按“一个同义词”处理。
+
+    若不归一化，``for alias in aliases`` 会把字符串逐字符当成别名，静默产生错映射。
+    """
+    result: Dict[str, List[str]] = {}
+    if not isinstance(raw, dict):
+        return result
+    for canonical, aliases in raw.items():
+        if isinstance(aliases, str):
+            values: List[Any] = [aliases]
+        elif isinstance(aliases, (list, tuple, set, frozenset)):
+            values = list(aliases)
+        else:
+            notes.append(f"别名 {canonical} 的同义词写法不支持（{type(aliases).__name__}），已跳过")
+            continue
+        cleaned = [str(item).strip() for item in values if str(item or "").strip()]
+        if cleaned:
+            result[str(canonical)] = cleaned
+    return result
+
+
+def _clean_unit_symbols(raw: Any, notes: List[str]) -> Dict[str, str]:
+    """单位写法 → 标准符号：只保留“值是字符串”的条目。"""
+    result: Dict[str, str] = {}
+    if not isinstance(raw, dict):
+        return result
+    for written, canonical in raw.items():
+        if isinstance(canonical, str) and canonical.strip():
+            result[str(written)] = canonical.strip()
+        else:
+            notes.append(f"单位写法 {written} 的标准符号不是字符串，已跳过")
+    return result
+
+
+def _clean_units(raw: Any, notes: List[str]) -> Dict[str, Dict[str, Any]]:
+    """量纲表归一化：条目须为 ``{canonical, factors}``；坏条目跳过，避免换算时抛 AttributeError / TypeError。"""
+    result: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(raw, dict):
+        return result
+    for dimension, info in raw.items():
+        if not isinstance(info, dict) or not isinstance(info.get("factors"), dict):
+            notes.append(f"量纲 {dimension} 缺少 factors 对象，已跳过")
+            continue
+        factors: Dict[str, float] = {}
+        for unit, factor in info["factors"].items():
+            try:
+                factors[str(unit)] = float(factor)
+            except (TypeError, ValueError):
+                notes.append(f"量纲 {dimension} 的换算因子 {unit} 不是数字，已跳过")
+        if not factors:
+            notes.append(f"量纲 {dimension} 没有可用的换算因子，已跳过")
+            continue
+        entry: Dict[str, Any] = {"factors": factors}
+        canonical = info.get("canonical")
+        if isinstance(canonical, str) and canonical.strip():
+            entry["canonical"] = canonical.strip()
+        result[str(dimension)] = entry
+    return result
+
+
 def load_alias_rules(rules_path: Optional[Path], explicit: bool) -> Tuple[Dict[str, Any], str]:
-    """加载属性别名与单位规则；显式指定但不可用时抛异常（退出码 2）。"""
+    """加载属性别名与单位规则，返回 (规则字典, 来源说明)。
+
+    宽容策略：字段缺失 / 类型不对 / 嵌套写法不规范时按可用部分继续，原因写入来源说明，
+    不让一条写错的规则中止整条流水线；显式指定 ``--alias-rules`` 且完全不可用时抛异常（退出码 2）。
+    """
     if rules_path is None or not Path(rules_path).is_file():
         if explicit:
             raise FileNotFoundError(f"规则文件不存在：{rules_path}")
         return {}, "未找到规则文件（未做别名合并与单位换算）"
     try:
         with open(Path(rules_path), "r", encoding="utf-8-sig") as f:
-            rules = json.load(f)
+            raw = json.load(f)
         source = str(Path(rules_path))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         if explicit:
             raise ValueError(f"规则文件无法解析：{rules_path}（{exc}）")
         return {}, f"规则文件无法解析（{exc}），未做别名合并与单位换算"
+
+    notes: List[str] = []
+    if not isinstance(raw, dict):
+        if explicit:
+            raise ValueError(f"规则文件格式错误：顶层应为对象（{rules_path}）")
+        return {}, "规则文件格式错误（顶层应为对象），未做别名合并与单位换算"
+
+    rules: Dict[str, Any] = {
+        "attribute_aliases": _clean_alias_map(raw.get("attribute_aliases"), notes),
+        "unit_symbols": _clean_unit_symbols(raw.get("unit_symbols"), notes),
+        "units": _clean_units(raw.get("units"), notes),
+    }
     for key in ("attribute_aliases", "unit_symbols", "units"):
-        if key not in rules or not isinstance(rules[key], dict):
-            raise ValueError(f"规则文件缺少有效字段：{key}")
+        if key not in raw:
+            notes.append(f"缺少字段 {key}")
+    if explicit and not any(rules.values()):
+        raise ValueError(f"规则文件不可用：{rules_path}（{'；'.join(notes) or '未提供有效字段'}）")
+    if notes:
+        source = f"{source}（{'；'.join(notes)}）"
     return rules, source
 
 
@@ -383,12 +464,34 @@ def compute_fenced_lines(lines: List[str]) -> Set[int]:
     return fenced
 
 
+EVIDENCE_LIMIT = 160  # 证据原文的展示上限（字符数）
+
+
+def _evidence_text(evidence_line: str, record: Dict[str, Any]) -> str:
+    """证据原文：窄行原样保留；宽行以“属性名 / 取值”出现处为中心截取。
+
+    宽表格行（如左右并排多组的规格书表）里靠后的“属性-取值”若只截行首，
+    证据里就看不到被抽取的内容；以命中处为中心截取可保证关键内容一定在证据里。
+    """
+    line = evidence_line or ""
+    if len(" ".join(line.split())) <= EVIDENCE_LIMIT:
+        return truncate_text(line, EVIDENCE_LIMIT)
+    for needle in (record.get("attribute_raw"), record.get("value_raw")):
+        text = str(needle or "").strip()
+        if not text:
+            continue
+        pos = line.find(text)
+        if pos >= 0:
+            return truncate_text(window_text(line, pos, pos + len(text), radius=50), EVIDENCE_LIMIT)
+    return truncate_text(line, EVIDENCE_LIMIT)
+
+
 def _append_record(
     entry: Dict[str, Any], record: Dict[str, Any], line_no: int, context: str, evidence_line: str
 ) -> None:
     record["line_number"] = line_no
     record["context"] = context
-    record["evidence"] = truncate_text(evidence_line, 160)
+    record["evidence"] = _evidence_text(evidence_line, record)
     entry["attributes"].append(record)
 
 

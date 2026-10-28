@@ -48,6 +48,7 @@ from generate_report import (  # noqa: E402
     relative_path,
     safe_print,
     truncate_text,
+    window_text,
     write_text_file,
     write_xlsx_file,
 )
@@ -231,10 +232,25 @@ class PatternRule:
     suggested_action: str
 
 
-def _compile_flags(flag_names: Optional[List[str]]) -> int:
+def _compile_flags(flag_names: Any) -> int:
+    """把 flags 写法解析为 re 标志位。
+
+    宽容写法：``["IGNORECASE", "MULTILINE"]``（推荐）、``"IGNORECASE|MULTILINE"``、
+    ``"IGNORECASE, MULTILINE"``、单个 ``"IGNORECASE"`` 与 ``None`` 都接受。
+    """
+    if flag_names is None:
+        names: List[Any] = []
+    elif isinstance(flag_names, str):
+        names = [part for part in re.split(r"[|,\s]+", flag_names) if part]
+    elif isinstance(flag_names, (list, tuple, set, frozenset)):
+        names = list(flag_names)
+    else:
+        raise ValueError(f"flags 写法不支持：{flag_names!r}（可用：IGNORECASE、MULTILINE）")
     flags = 0
-    for name in flag_names or []:
-        name_upper = str(name).upper()
+    for name in names:
+        name_upper = str(name).strip().upper()
+        if not name_upper:
+            continue
         if name_upper == "IGNORECASE":
             flags |= re.IGNORECASE
         elif name_upper == "MULTILINE":
@@ -244,43 +260,31 @@ def _compile_flags(flag_names: Optional[List[str]]) -> int:
     return flags
 
 
-def load_rules(rules_path: Optional[Path], explicit: bool) -> Tuple[List[PatternRule], str]:
-    """加载文本异常规则，返回 (规则列表, 来源说明)。
+def _parse_rules(raw_rules: Dict[str, Any], notes: List[str]) -> List[PatternRule]:
+    """把 ``{类别: [规则, ...]}`` 编译为规则列表。
 
-    - 显式指定 --rules 且文件不可用：抛出异常（CLI 以退出码 2 结束）；
-    - 默认路径文件不可用：回退到内置精简规则，并在报告中注明来源。
+    单条规则有问题（缺 pattern、flags 写法不支持、正则编译失败）只跳过该条并把原因写入 notes，
+    不影响同一类别里的其余规则，也不再让整条流水线中止。
     """
-    if rules_path is None or not Path(rules_path).is_file():
-        if explicit:
-            raise FileNotFoundError(f"规则文件不存在：{rules_path}")
-        data = {"rules": BUILTIN_RULES}
-        source = "内置兜底规则（未找到 rules/ocr_patterns.json）"
-    else:
-        try:
-            with open(Path(rules_path), "r", encoding="utf-8-sig") as f:
-                data = json.load(f)
-            source = str(Path(rules_path))
-        except (OSError, json.JSONDecodeError) as exc:
-            if explicit:
-                raise ValueError(f"规则文件无法解析：{rules_path}（{exc}）")
-            data = {"rules": BUILTIN_RULES}
-            source = f"内置兜底规则（{rules_path} 无法解析：{exc}）"
-
     rules: List[PatternRule] = []
-    raw_rules = data.get("rules", {})
-    if not isinstance(raw_rules, dict):
-        raise ValueError("规则文件格式错误：rules 应为按类别分组的对象")
     for category, entries in raw_rules.items():
         issue_type = CATEGORY_ISSUE_TYPE.get(str(category))
-        if issue_type is None or not isinstance(entries, list):
+        if issue_type is None:
+            notes.append(f"未识别的规则类别 {category}（可用：{'、'.join(sorted(CATEGORY_ISSUE_TYPE))}）")
+            continue
+        if not isinstance(entries, list):
+            notes.append(f"规则类别 {category} 不是数组")
             continue
         for entry in entries:
-            if not isinstance(entry, dict) or "pattern" not in entry:
-                raise ValueError(f"规则类别 {category} 中存在缺少 pattern 的条目")
+            if not isinstance(entry, dict) or not str(entry.get("pattern") or "").strip():
+                notes.append(f"规则类别 {category} 中有条目缺少 pattern")
+                continue
             try:
                 regex = re.compile(str(entry["pattern"]), _compile_flags(entry.get("flags")))
             except (re.error, ValueError) as exc:
-                raise ValueError(f"规则 {entry.get('id', '?')} 的正则无法编译：{exc}")
+                label = entry.get("id") or category
+                notes.append(f"规则 {label} 不可用（{exc}）")
+                continue
             rules.append(
                 PatternRule(
                     rule_id=str(entry.get("id", category)),
@@ -290,6 +294,59 @@ def load_rules(rules_path: Optional[Path], explicit: bool) -> Tuple[List[Pattern
                     suggested_action=str(entry.get("suggested_action", "对照原始文档核实该处内容。")),
                 )
             )
+    return rules
+
+
+def load_rules(rules_path: Optional[Path], explicit: bool) -> Tuple[List[PatternRule], str]:
+    """加载文本异常规则，返回 (规则列表, 来源说明)。
+
+    宽容策略（一条规则写错不让整条流水线停摆）：
+    - 单条规则缺 pattern / flags 写法不支持 / 正则编译失败 → 只跳过该条，原因写入来源说明；
+    - 未识别的类别、非数组的类别 → 跳过并写入来源说明，不再静默丢弃；
+    - 文件缺失 / 无法解析 / 一条规则都加载不到：默认路径回退内置兜底规则并在报告中注明原因；
+      显式指定 ``--rules`` 时抛异常（CLI 以退出码 2 结束）。
+    """
+    notes: List[str] = []
+    if rules_path is None or not Path(rules_path).is_file():
+        if explicit:
+            raise FileNotFoundError(f"规则文件不存在：{rules_path}")
+        source = "内置兜底规则（未找到 rules/ocr_patterns.json）"
+        data: Any = {"rules": BUILTIN_RULES}
+    else:
+        source = str(Path(rules_path))
+        try:
+            with open(Path(rules_path), "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            if explicit:
+                raise ValueError(f"规则文件无法解析：{rules_path}（{exc}）")
+            data = {"rules": BUILTIN_RULES}
+            source = f"内置兜底规则（{rules_path} 无法解析：{exc}）"
+
+    raw_rules: Any = data.get("rules", {}) if isinstance(data, dict) else {}
+    if isinstance(data, dict) and not raw_rules and any(k in CATEGORY_ISSUE_TYPE for k in data):
+        # 少写了 "rules" 外层、顶层直接是类别分组：按该写法解析，避免静默加载 0 条规则
+        notes.append("未找到 rules 外层，已按“顶层直接是类别分组”解析")
+        raw_rules = data
+    if not isinstance(raw_rules, dict):
+        if explicit:
+            raise ValueError(f"规则文件格式错误：rules 应为按类别分组的对象（{rules_path}）")
+        notes.append("rules 不是按类别分组的对象")
+        raw_rules = {}
+
+    rules = _parse_rules(raw_rules, notes)
+
+    if not rules and "内置兜底规则" not in source:
+        # 文件存在却一条规则都没加载到：宁可回退内置规则并写明原因，也不要静默少做 3 项检查
+        reason = "；".join(notes) if notes else "rules 为空"
+        if explicit:
+            raise ValueError(f"规则文件未提供任何可用规则：{rules_path}（{reason}）")
+        source = f"内置兜底规则（{rules_path} 未提供可用规则：{reason}）"
+        notes = []
+        rules = _parse_rules(BUILTIN_RULES, [])
+
+    if notes:
+        source = f"{source}（{'；'.join(notes)}）"
     return rules, source
 
 
@@ -493,19 +550,23 @@ def scan_file(
                 add(
                     rule.issue_type,
                     line_no,
-                    line,
-                    f"命中规则 [{rule.rule_id}]：{rule.description}。",
+                    # 以命中位置为中心截取：长行里命中点靠后时，只截行首会把证据本身截掉
+                    window_text(line, _m.start(), _m.end()),
+                    f"命中规则 [{rule.rule_id}]：{rule.description}。"
+                    f"命中片段：“{truncate_text(_m.group(0), 80)}”。",
                     rule.suggested_action,
                 )
 
     def check_chars(line: str, line_no: int) -> None:
         """替换字符 U+FFFD 检查（解码失败的占位符，内容已丢失）。"""
-        if chr(0xFFFD) in line:
+        count = line.count(chr(0xFFFD))
+        if count:
+            first = line.index(chr(0xFFFD))
             add(
                 "replacement_char",
                 line_no,
-                line,
-                f"发现 {line.count(chr(0xFFFD))} 个替换字符 U+FFFD（通常意味着该处编码损坏或转写失败，内容已丢失）。",
+                window_text(line, first, first + 1),
+                f"发现 {count} 个替换字符 U+FFFD（通常意味着该处编码损坏或转写失败，内容已丢失）。",
                 _REPLACEMENT_CHAR_ACTION,
             )
 
@@ -768,7 +829,8 @@ def build_sheet_rows(data: Dict[str, Any]) -> List[Tuple[Any, ...]]:
             (
                 issue.get("file_path") or "",
                 issue.get("line_number") if issue.get("line_number") else "",
-                CHECK_NAMES.get(issue_type, issue_type),
+                # 直接取 Issue.to_dict() 已算好的标签，同一映射不再算两遍
+                issue.get("issue_type_label") or issue_type,
                 issue.get("explanation") or "",
                 issue.get("evidence") or "",
                 issue.get("suggested_action") or "",
@@ -1033,7 +1095,15 @@ def run(argv: Optional[List[str]] = None) -> int:
     results: List[FileResult] = []
     issues_seen = 0
     for index, fp in enumerate(files, 1):
-        result = scan_file(fp, relative_path(fp, input_path), rules, args.max_file_size)
+        try:
+            result = scan_file(fp, relative_path(fp, input_path), rules, args.max_file_size)
+        except Exception as exc:  # 单个文件出意外（文件被并发删除、异常字节等）不应中断几万篇的整批审查
+            result = FileResult(
+                path=fp,
+                rel_path=relative_path(fp, input_path),
+                skipped=True,
+                skip_reason=f"扫描异常（{type(exc).__name__}：{exc}），未做内容级检查",
+            )
         results.append(result)
         issues_seen += len(result.issues)
         bar.update(index, detail=result.rel_path, extra=f"已发现 {issues_seen:,} 处问题")
@@ -1052,9 +1122,13 @@ def run(argv: Optional[List[str]] = None) -> int:
         input_path, output_dir, results, rules_source, args.max_file_size, args.report_name
     )
 
-    html_path = write_text_file(output_dir / f"{args.report_name}.html", render_html_report(data))
-    safe_print(f"[audit_markdown] HTML 报告：{html_path}")
-    sheet_path = write_issue_sheet(output_dir / f"{args.report_name}.xlsx", data)
+    # 写盘兜底：目录只读、磁盘写满、交付文件被 Excel/WPS 占用等都会抛 OSError，这里统一转成清晰错误而不是崩栈
+    try:
+        html_path = write_text_file(output_dir / f"{args.report_name}.html", render_html_report(data))
+        safe_print(f"[audit_markdown] HTML 报告：{html_path}")
+        sheet_path = write_issue_sheet(output_dir / f"{args.report_name}.xlsx", data)
+    except OSError as exc:
+        return print_error(f"无法写入交付文件（目录 {output_dir}）：{exc}")
     safe_print(
         f"[audit_markdown] XLSX 清单表格：{sheet_path}（{data['issues_total']} 行，一行一处问题；"
         f"检查项 {len(CHECK_ITEMS)} 项）"
