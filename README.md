@@ -80,18 +80,75 @@ python scripts/detect_conflicts.py input/                        # 只跑②属�
 
 HTML 单文件、样式内联，双击即开可直接转发；XLSX 表头着色、列宽、斑马纹、首行冻结并开启自动筛选。
 
-## 安装到 Agent
+## 安装
 
-遵循 [Agent Skills 开放标准](https://agentskills.io/specification)：一个技能就是一个目录，至少含 `SKILL.md`。仓库内置两个客户端的项目级发现路径：`.claude/skills/knowledge-audit/`（Claude Code）与 `.agents/skills/knowledge-audit/`（Codex）。
+本技能遵循 [Agent Skills 开放标准](https://agentskills.io/specification)：一个目录即一个技能，至少含 `SKILL.md`；本技能还需要同级的 `scripts/` 与 `rules/`。
 
-```bash
-cp -r .claude/skills/knowledge-audit /path/to/your-project/.claude/skills/   # 装到别的项目
-cp -r .claude/skills/knowledge-audit ~/.claude/skills/                        # 装成个人级
+**安装 = 把仓库根目录的 `SKILL.md` + `scripts/` + `rules/` 放进目标技能目录。** 仓库里 `.claude/skills/knowledge-audit/` 只是同步好的 `SKILL.md` 副本，直接拿它并不完整，请按下面的命令组装。
+
+各客户端的技能目录：
+
+| 使用方式 | 技能目录（放入 `SKILL.md` + `scripts/` + `rules/`） |
+| --- | --- |
+| CCSwitch（Windows 图形化） | `%USERPROFILE%\.claude\skills\knowledge-audit\` |
+| Claude Code · 个人级（所有项目） | `~/.claude/skills/knowledge-audit/` |
+| Claude Code · 项目级 | `<你的项目>/.claude/skills/knowledge-audit/` |
+| Codex · 项目级 | `<你的项目>/.agents/skills/knowledge-audit/` |
+
+### 1. 先组装技能目录
+
+**Windows PowerShell**（在仓库根目录执行，装成 Claude Code 个人级为例）：
+
+```powershell
+$dst = "$env:USERPROFILE\.claude\skills\knowledge-audit"
+New-Item -ItemType Directory -Force -Path "$dst\scripts","$dst\rules" | Out-Null
+Copy-Item SKILL.md  "$dst\SKILL.md"
+Copy-Item scripts\*.py "$dst\scripts\"
+Copy-Item rules\*.json "$dst\rules\"
 ```
 
-用法：自然语言触发（“帮我审查这批知识库文档的转写质量”），或显式 `/knowledge-audit input/`。
+**macOS / Linux / Git Bash**：
 
-> 根目录 `SKILL.md` 是唯一真源，`.claude/`、`.agents/` 下是脚本同步的副本。改完执行 `python scripts/sync_skill.py`，校验用 `python scripts/sync_skill.py --check`。
+```bash
+DST=~/.claude/skills/knowledge-audit
+mkdir -p "$DST/scripts" "$DST/rules"
+cp SKILL.md "$DST/"
+cp scripts/*.py "$DST/scripts/"
+cp rules/*.json "$DST/rules/"
+```
+
+> 装到别的目录（项目级 / Codex）时，把 `$dst` / `DST` 换成上表对应的路径即可。
+
+### 2. CCSwitch
+
+CCSwitch 的「Skills」页管理的就是本地技能目录（默认 `%USERPROFILE%\.claude\skills\`）。
+
+1. 按上一步组装到该目录；
+2. 回到 CCSwitch → Skills 页 → 点右上角 **「添加 Skill」「添加」**（选“从本地目录”指向该目录），或点 **「检查更新」** 让它自动识别；
+3. 在列表里给 `knowledge-audit` 勾选要启用的客户端（Claude Code / Claude Desktop 等）。
+
+### 3. Claude Code
+
+- **个人级（所有项目可用）**：组装到 `~/.claude/skills/knowledge-audit/`；
+- **项目级（只对该项目生效）**：组装到 `<项目>/.claude/skills/knowledge-audit/`，随项目一起提交。
+
+启动 `claude` 后即可用自然语言触发，例如：
+> 帮我用 knowledge-audit 审查 `input/` 这批 Markdown 的转写质量
+
+也可以显式调用 `/knowledge-audit <目录>`。
+
+### 4. Codex
+
+把技能组装到 Git 仓库内的 `.agents/skills/knowledge-audit/`（Codex 会扫描仓库里的 `.agents/skills/`）；个人级可放到 `~/.agents/skills/knowledge-audit/`（以你的 Codex 配置为准）。之后在会话中描述任务即可触发。
+
+### 验证与升级
+
+- **验证**：技能目录里应能看到 `SKILL.md`、`scripts/`、`rules/` 三样；进入该目录运行
+  `python scripts/run_all.py <一个含 .md 的目录>` 能产出 4 个交付文件即安装成功。
+- **升级**：仓库更新后，重新执行「先组装技能目录」的复制命令即可（`git pull` 后覆盖 `SKILL.md`、`scripts/`、`rules/`）。
+
+> 根目录 `SKILL.md` 是唯一真源，`.claude/`、`.agents/` 下是同步副本。改完执行 `python scripts/sync_skill.py`，校验用 `python scripts/sync_skill.py --check`。
+
 
 ## 命令行
 
