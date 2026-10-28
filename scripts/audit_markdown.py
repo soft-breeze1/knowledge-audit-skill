@@ -6,7 +6,7 @@
 每次运行产出两份交付文件（写入同一个目录，不修改任何输入文件）：
 
     <报告基名>.html   单文件 HTML 报告（内联样式、无外部资源，双击即可打开或转发）
-    <报告基名>.xlsx   逐行问题清单表格（文件、行号、问题类型、问题说明、证据原文、建议操作）
+    <报告基名>.xlsx   逐行问题清单表格（文件、行号、问题类型、问题说明、证据原文）
 
 检查口径 = 固定 6 项检查（口径见 CHECK_ITEMS）：
     编码可解码性（UTF-8） / 替换字符 U+FFFD / 编码乱码特征 / OCR 标记残留 / 占位符文本 / 空文件检测
@@ -78,8 +78,8 @@ NOISE_MIN_RATIO = 0.2  # “高频同型”占全部问题数的比例门槛
 TOP_FILES_LIMIT = 10  # “问题最多的文件”列出条数
 # 清单表格（XLSX）表头、列宽与数字列
 SHEET_NAME = "问题清单"
-SHEET_HEADER: Tuple[str, ...] = ("文件", "行号", "问题类型", "问题说明", "证据原文", "建议操作")
-SHEET_WIDTHS: Tuple[int, ...] = (36, 8, 30, 46, 46, 40)
+SHEET_HEADER: Tuple[str, ...] = ("文件", "行号", "问题类型", "问题说明", "证据原文")
+SHEET_WIDTHS: Tuple[int, ...] = (36, 8, 30, 46, 46)
 SHEET_NUMERIC_COLS: Tuple[int, ...] = (1,)  # 行号按数字右对齐
 
 # 检查口径：固定 6 项检查，分类即检查项（报告与清单表格的「问题类型」就是这里的名称）——
@@ -817,7 +817,7 @@ def build_sheet_rows(data: Dict[str, Any]) -> List[Tuple[Any, ...]]:
     """把审查结果展开为清单表格的数据行（一行 = 一处问题）。
 
     与 HTML 报告不同，表格不做聚合省略：每一处问题都单独一行，直接给出
-    「文件 / 行号 / 问题类型 / 问题说明 / 证据原文 / 建议操作」，便于直接筛出
+    「文件 / 行号 / 问题类型 / 问题说明 / 证据原文」，便于直接筛出
     “哪个文档的什么地方出现了什么问题”；行号为空表示该问题覆盖整个文件、无法定位到具体行。
 
     6 项检查的问题全部写入本清单。
@@ -833,7 +833,6 @@ def build_sheet_rows(data: Dict[str, Any]) -> List[Tuple[Any, ...]]:
                 issue.get("issue_type_label") or issue_type,
                 issue.get("explanation") or "",
                 issue.get("evidence") or "",
-                issue.get("suggested_action") or "",
             )
         )
     return rows
@@ -953,7 +952,7 @@ def render_html_report(data: Dict[str, Any]) -> str:
         )
 
     notes = list(scope["notes"]) + [
-        "同名清单表格（.xlsx）逐行列出全部问题：文件、行号、问题类型、问题说明、证据原文、建议操作；"
+        "同名清单表格（.xlsx）逐行列出全部问题：文件、行号、问题类型、问题说明、证据原文；"
         "「问题类型」就是本报告的检查项名称（如「替换字符 U+FFFD」「OCR 标记残留」）；"
         "行号为空表示该问题覆盖整个文件、无法定位到具体行。",
         "本次实际执行的检查项：" + checks_summary() + "。",
