@@ -1,14 +1,20 @@
+<div align="center">
+
 # knowledge-audit-skill
 
-知识库质量审查的 Agent Skill。一条命令做两类客观检查：
+**知识库质量审查 Agent Skill**
 
-- **文档转写质量**：乱码、替换字符、OCR 标记、占位符、空文件等；
-- **同型号属性冲突**：同一型号、同一属性在不同文档里取值不一致。
-
-每条结论都带证据定位（文件 / 行号 / 原文）。只读输入、不改原文件；只用 Python 3.9+ 标准库，无第三方依赖，Windows / macOS / Linux 通用。
+一条命令查两类问题：文档转写质量、同型号属性冲突<br/>
+结论均带证据定位（文件 / 行号 / 原文）· 只读输入 · 零第三方依赖
 
 [![Python](https://img.shields.io/badge/Python-3.9%2B-3772ab?logo=python&logoColor=white)](https://www.python.org/)
+[![Dependencies](https://img.shields.io/badge/%E4%BE%9D%E8%B5%96-0-2ea44f)](#快速开始)
 [![License](https://img.shields.io/badge/License-MIT-16a34a)](LICENSE)
+[![Agent Skills](https://img.shields.io/badge/Agent%20Skills-%E5%BC%80%E6%94%BE%E6%A0%87%E5%87%86-2563eb)](https://agentskills.io)
+
+</div>
+
+---
 
 ## 检查什么
 
