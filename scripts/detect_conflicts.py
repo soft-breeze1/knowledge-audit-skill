@@ -1,29 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""detect_conflicts.py — 同一型号同类属性冲突检测（第二阶段）。
+"""detect_conflicts.py — 同一型号同类属性冲突比对（规则式抽取，非语义推断）。
 
-输入：知识库 Markdown（文件夹或单个 `.md`，内部完成规则式属性抽取），
-按（型号, 标准属性名, 工况）分组比对：
-
-- 三要素必须完全一致才比较：型号按原文精确匹配（只去首尾空白），不做模糊归类；
-- 取值一致的分组不算冲突，不写入报告；只写入取值不一致的分组，并保留各来源的文件、行号、
-  原始取值与证据原文。
-
-比较口径（只判断“一致 / 不一致”，不做其它分类）：
-1) 各方单位均在规则表中、量纲已知且相同 → 按换算后的标准值比较；
-2) 各方单位字面相同但未收录于规则表 → 按数值字面比较；
-3) 其余情况（单位不一致或缺失、无法换算）→ 按原始取值字面比较。
-
-每次运行产出两份交付文件（写入同一个目录）：
-
-    <报告基名>.html   单文件 HTML 报告（按「相同属性但描述不一致」分组列出型号 + 属性 + 各来源）
-    <报告基名>.xlsx   逐行冲突清单表格（一行 = 一处来源取值，同一冲突共用同一「冲突编号」）
-
-用法：
-    python scripts/detect_conflicts.py input/
-    python scripts/detect_conflicts.py input/ --output output/
-（不指定 --output 时报告写入 output/<时间戳>/，每次运行新建一个目录）
-退出码：0=正常完成；1=输入/输出错误；2=规则文件错误。
+读取 Markdown（目录或单个文件），内部完成属性抽取后按（型号, 标准属性名, 工况）分组比对；
+只列出取值不一致且证据来自 ≥2 个不同文件的分组，并给出各来源文件、行号、取值与证据原文。
+产出两份交付文件（HTML 报告 + XLSX 逐行清单），不修改输入、不生成 MD/JSON。
+退出码：0=完成；1=输入/输出错误；2=规则文件错误。
 """
 
 from __future__ import annotations
@@ -41,22 +23,19 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from generate_report import (  # noqa: E402
     TOOL_VERSION,
+    build_html,
+    details,
+    esc,
+    kpi_cards,
     make_timestamped_dir,
     now_local_str,
     now_utc_iso,
     print_error,
     safe_print,
-    write_text_file,
-    write_xlsx_file,
-)
-
-from html_report import (  # noqa: E402
-    build_html,
-    details,
-    esc,
-    kpi_cards,
     section,
     table,
+    write_text_file,
+    write_xlsx_file,
 )
 from attribute_extract import build_extraction  # noqa: E402
 from audit_markdown import SUPPORTED_EXTENSIONS  # noqa: E402
@@ -394,10 +373,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "示例：\n"
             "  python scripts/detect_conflicts.py input/\n"
             "  python scripts/detect_conflicts.py input/ --output output\n"
-            "不指定 --output 时报告写入 output/<时间戳>/（每次运行新建一个目录）；\n"
-            "每次产出两份交付文件：HTML 报告 + XLSX 清单表格（一行一处来源取值，按「冲突编号」分组；"
-            "表头配色、列宽、冻结首行、自动筛选）；不生成 Markdown / JSON。\n"
-            "退出码：0=正常完成；1=输入/输出错误；2=规则文件错误。"
+            "不指定 --output 时写入 output/<时间戳>/；每次产出 HTML 报告 + XLSX 清单表格，不生成 Markdown / JSON。\n"
+            "退出码：0=完成；1=输入/输出错误；2=规则文件错误。"
         ),
     )
     parser.add_argument("input", help="待比对的 Markdown 文件或目录（递归扫描）")

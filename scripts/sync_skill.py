@@ -1,21 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""sync_skill.py — 将项目根目录的 SKILL.md 同步到两个 Agent 的项目级发现目录。
+"""sync_skill.py — 把根目录的 SKILL.md（唯一真源）同步到 Claude Code / Codex 的项目级发现目录，并校验一致性。
 
-依据官方规范：
-- Claude Code 项目级 Skill 路径：.claude/skills/<skill-name>/SKILL.md
-- Codex 项目级 Skill 路径（Git 仓库内）：.agents/skills/<skill-name>/SKILL.md
-- 两者均遵循 Agent Skills 开放标准（agentskills.io），
-  frontmatter 仅使用标准字段（name/description/license/compatibility/metadata/allowed-tools），
-  因此同一份 SKILL.md 可以安全复用；本脚本用“复制 + 校验”方式维护两份副本，
-  防止内容漂移。
-
-用法：
-    python scripts/sync_skill.py            # 执行同步（复制到两个发现目录）
-    python scripts/sync_skill.py --check    # 仅校验一致性（不一致时退出码 1）
-
-校验内容：两个发现目录的 SKILL.md 与根目录真源逐字节一致；且 SKILL.md 的 ``metadata.version`` 与
-``scripts/generate_report.py`` 的 ``TOOL_VERSION`` 一致（避免版本号在两处漂移）。
+发现目录：.claude/skills/<name>/SKILL.md 与 .agents/skills/<name>/SKILL.md。
+校验：副本与真源逐字节一致，且 SKILL.md 的 metadata.version 与 generate_report.TOOL_VERSION 一致。
+用法：python scripts/sync_skill.py（同步） / --check（仅校验，不一致时退出码 1）
 """
 from __future__ import annotations
 

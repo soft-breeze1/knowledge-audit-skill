@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""generate_report.py — knowledge-audit-skill 共享报告工具库。
+"""generate_report.py — 交付层共享工具库（被 audit_markdown / detect_conflicts / fetch 等复用）。
 
-为 audit_markdown.py / detect_conflicts.py 提供：
-- 交付文件写出：HTML 报告（UTF-8、无 BOM、LF 换行）与 XLSX 清单（表头配色、列宽、
-  单元格边框、冻结首行、自动筛选，Excel / WPS 双击即可打开）；不生成 Markdown / JSON 文件
-- 时间戳与运行目录生成（每次任务一个带完整时间戳的子目录，互不覆盖）
-- 文件展示路径、文本截断/计数、控制台安全输出等小工具
-
-本模块不包含任何检测逻辑，仅供 scripts/ 下的脚本复用。
+提供：HTML 报告渲染原语（自包含、样式内联）、XLSX 清单写出（标准库手写 Open XML）、
+时间戳运行目录、文本截断/取窗、进度条与控制台安全输出。不含任何检测/抽取逻辑。
 """
 from __future__ import annotations
 
+import html
 import re
 import shutil
 import sys
@@ -21,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-TOOL_VERSION = "1.0.6"
+TOOL_VERSION = "1.1.0"
 
 
 def now_utc_iso() -> str:
@@ -388,27 +384,8 @@ def progress_enabled(stream: Any = None, override: Optional[bool] = None) -> boo
 
 
 class Progress:
-    """终端进度条（标准库实现，可用于 7 万+ 文件的长任务，全程只占一行）。
-
-    用法::
-
-        bar = Progress("质量审查", len(files))
-        for index, fp in enumerate(files, 1):
-            ...
-            bar.update(index, detail=Path(fp).name, extra="已发现 3,201 处问题")
-        bar.finish(extra="检查 74,240 个文件，发现 3,201 处问题")
-
-    交互终端下的显示形态::
-
-        [质量审查] ██████████░░░░░░░░░░ 58.3%  43,221/74,240  剩余约 00:14:02  已发现 3,201 处问题
-
-    行为约定：
-
-    - 交互终端：``\\r`` 原地刷新同一行，``finish()`` 补一个换行；
-    - 非交互终端（重定向到文件、CI 日志）：不写 ``\\r``，每完成 ``log_step`` 个百分点打印一行；
-    - ``total`` 为 0 / None 时退化为“已完成数量 + 用时”，不显示百分比与预计剩余；
-    - 刷新有节流（默认 0.1 秒），不会因为打印而拖慢扫描；``update`` 在 100% 时不打印，
-      最终汇总行统一由 ``finish()`` 给出。
+    """终端进度条（标准库实现）：交互终端原地刷新一行，重定向/CI 自动降级为每 log_step% 一行；
+    total 为 0/None 时退化为“已完成数量 + 用时”；刷新有节流，不拖慢主流程。用法：update(done, detail=, extra=) / finish()。
     """
 
     def __init__(
@@ -532,3 +509,128 @@ def print_error(message: str) -> int:
     """打印错误信息并返回退出码 1（供 CLI main 使用）。"""
     safe_print(f"[错误] {message}")
     return 1
+
+
+# --------------------------------------------------------------------------- HTML 报告渲染
+# 自包含单文件 HTML（样式内联，无外部资源/网络依赖）：双击即可打开或转发。
+_CSS = """
+:root{
+  --bg:#f5f6f8; --card:#ffffff; --line:#e3e6ea; --text:#1f2937; --muted:#6b7280;
+  --accent:#2563eb; --accent-soft:#eff4ff; --warn:#b45309; --warn-soft:#fff7ed;
+  --ok:#047857; --ok-soft:#ecfdf5;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 -apple-system,"Segoe UI","Microsoft YaHei",Roboto,"Helvetica Neue",Arial,sans-serif;}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 18px 56px}
+header.page{background:linear-gradient(135deg,#1e3a8a,#2563eb);color:#fff;border-radius:14px;
+  padding:24px 26px;box-shadow:0 6px 18px rgba(30,58,138,.18)}
+header.page h1{margin:0 0 6px;font-size:23px;letter-spacing:.3px}
+header.page p{margin:0;opacity:.92;font-size:13.5px}
+.meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px 20px;
+  margin:18px 0 6px;font-size:13px;color:var(--muted)}
+.meta b{color:var(--text);font-weight:600}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:12px;margin:18px 0}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.kpi .k{font-size:12.5px;color:var(--muted);margin-bottom:4px}
+.kpi .v{font-size:22px;font-weight:600;letter-spacing:.4px}
+.kpi.warn .v{color:var(--warn)} .kpi.ok .v{color:var(--ok)} .kpi.hot .v{color:var(--accent)}
+section.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:18px 20px;margin:16px 0;box-shadow:0 1px 2px rgba(16,24,40,.04);overflow-x:auto}
+section.card>h2{margin:0 0 4px;font-size:17px;border-left:4px solid var(--accent);padding-left:10px}
+section.card .note{color:var(--muted);font-size:12.5px;margin:2px 0 12px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:6px 0 2px}
+th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top;word-break:break-word}
+th{background:#f8fafc;font-weight:600;white-space:nowrap}
+tr:nth-child(even) td{background:#fcfdfe}
+tbody tr:hover td{background:var(--accent-soft)}
+table td.num,table th.num{text-align:right;white-space:nowrap}
+details{border:1px solid var(--line);border-radius:10px;margin:8px 0;background:#fff}
+details>summary{cursor:pointer;padding:9px 12px;font-weight:600;font-size:13.5px;
+  list-style:none;display:flex;gap:8px;align-items:center;flex-wrap:wrap;transition:background .15s}
+details>summary:hover{background:#f8fafc}
+details>summary::-webkit-details-marker{display:none}
+details>summary::before{content:"▸";color:var(--muted);font-size:12px}
+details[open]>summary::before{content:"▾"}
+details>.body{padding:2px 12px 12px;border-top:1px solid var(--line)}
+.badge{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;
+  background:var(--accent-soft);color:var(--accent);border:1px solid #dbe6ff}
+.badge.warn{background:var(--warn-soft);color:var(--warn);border-color:#fde3c8}
+.badge.ok{background:var(--ok-soft);color:var(--ok);border-color:#c9f0dd}
+.badge.mute{background:#f3f4f6;color:var(--muted);border-color:var(--line)}
+code{background:#f3f4f6;border-radius:4px;padding:1px 5px;font-size:12.5px;
+  font-family:ui-monospace,Consolas,"Courier New",monospace}
+footer.page{margin-top:22px;color:var(--muted);font-size:12px;text-align:center}
+ul.plain{margin:6px 0;padding-left:20px}
+"""
+
+
+def esc(value: Any) -> str:
+    """HTML 转义（None 视为空串）。"""
+    return html.escape("" if value is None else str(value), quote=True)
+
+
+def kpi_cards(items: Sequence[Tuple[str, Any, str]]) -> str:
+    """顶部指标卡片；items 为 (标题, 数值, 语气) 序列，语气 ∈ {"", hot, warn, ok}。"""
+    parts: List[str] = ['<div class="kpis">']
+    for label, value, tone in items:
+        cls = f"kpi {tone}".strip()
+        parts.append(
+            f'<div class="{esc(cls)}"><div class="k">{esc(label)}</div>'
+            f'<div class="v">{esc(value)}</div></div>'
+        )
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def table(headers: Sequence[str], rows: Iterable[Sequence[Any]], align: Optional[Sequence[str]] = None) -> str:
+    """通用表格；align 为每列对齐方式（"num" 右对齐，其余左对齐）。"""
+    aligns = list(align or [])
+    parts: List[str] = ["<table><thead><tr>"]
+    for idx, head in enumerate(headers):
+        cls = ' class="num"' if idx < len(aligns) and aligns[idx] == "num" else ""
+        parts.append(f"<th{cls}>{esc(head)}</th>")
+    parts.append("</tr></thead><tbody>")
+    for row in rows:
+        parts.append("<tr>")
+        for idx, cell in enumerate(row):
+            cls = ' class="num"' if idx < len(aligns) and aligns[idx] == "num" else ""
+            parts.append(f"<td{cls}>{esc(cell)}</td>")
+        parts.append("</tr>")
+    parts.append("</tbody></table>")
+    return "".join(parts)
+
+
+def details(summary: str, body_html: str, open_: bool = False) -> str:
+    """可折叠明细块（默认折叠，避免长报告一屏铺满）。"""
+    open_attr = " open" if open_ else ""
+    return f'<details{open_attr}><summary>{summary}</summary><div class="body">{body_html}</div></details>'
+
+
+def section(title: str, body_html: str, note: Optional[str] = None) -> str:
+    """分节卡片。"""
+    head = f"<h2>{esc(title)}</h2>"
+    note_html = f'<div class="note">{esc(note)}</div>' if note else ""
+    return f'<section class="card">{head}{note_html}{body_html}</section>'
+
+
+def build_html(
+    title: str,
+    subtitle: str,
+    meta_pairs: Sequence[Tuple[str, str]],
+    sections: Sequence[str],
+    footer_note: str = "",
+) -> str:
+    """拼装完整 HTML 文档（内联样式、自包含、无外部依赖）。"""
+    meta_html = "".join(f"<div><b>{esc(k)}</b>：{esc(v)}</div>" for k, v in meta_pairs)
+    footer_html = f'<footer class="page">{esc(footer_note)}</footer>' if footer_note else ""
+    return (
+        '<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        f"<title>{esc(title)}</title>\n<style>{_CSS}</style>\n</head>\n<body>\n"
+        '<div class="wrap">\n'
+        f'<header class="page"><h1>{esc(title)}</h1><p>{esc(subtitle)}</p></header>\n'
+        f'<div class="meta">{meta_html}</div>\n'
+        + "\n".join(sections)
+        + "\n" + footer_html + "\n</div>\n</body>\n</html>\n"
+    )

@@ -2,16 +2,7 @@
 # -*- coding: utf-8 -*-
 """check_deliverables.py — 校验一次流水线的交付物是否为 2 个 HTML 报告 + 2 个 XLSX 清单。
 
-CI 卡口专用：一律以 `python scripts/check_deliverables.py` 调用，不依赖任何 shell 特性
-（Windows / Linux 上行为一致），本地跑完 `python scripts/run_all.py input/` 后也可以用同一条
-命令自检。失败时除打印细节外，还会发出 GitHub Actions 的 `::error::` 注解，便于在 Actions
-页面上直接看到差在哪。
-
-用法：
-    python scripts/check_deliverables.py                  # 校验 output/ 下最新的运行目录
-    python scripts/check_deliverables.py --output output
-    python scripts/check_deliverables.py --expect-html 2 --expect-xlsx 2
-
+CI 卡口与本地自检共用；不依赖 shell 特性（Windows/Linux 行为一致），失败时发出 GitHub Actions 注解。
 退出码：0=交付物齐全；1=没有运行目录或交付文件不符。
 """
 from __future__ import annotations

@@ -1,51 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""fetch_knowledge.py — 从在线知识库抓取已转写好的 Markdown 文档（审查流程的输入缓存）。
+"""fetch_knowledge.py — 从在线知识库抓取已转写好的 Markdown（审查流程的输入缓存）。
 
-输入：知识库文档列表页地址（如 ``https://kb.example.com/knowledge/asset``）+ 访问令牌。
-默认接口契约（``<api-base>`` 默认为「页面地址的站点根 + ``/api/v1``」，用 ``--api-base`` 可整体改到任意前缀）：
+输入知识库列表页地址 + 访问令牌，接口契约见下方常量区（``--api-base`` 可整体指定接口前缀）：
+    列表  GET <api-base>/knowledge/assets?limit=&offset=&workspaceId=
+    版本  GET <api-base>/knowledge/assets/<assetId>/versions
+    正文  GET <api-base>/knowledge/assets/<assetId>/versions/<assetVersionId>/content
 
-    列表  GET  <api-base>/knowledge/assets?limit=&offset=&workspaceId=
-    版本  GET  <api-base>/knowledge/assets/<assetId>/versions
-    正文  GET  <api-base>/knowledge/assets/<assetId>/versions/<assetVersionId>/content
-
-路径、筛选字段与响应字段名都集中在下方常量区，对接自己的后端时改常量或传 --api-base 即可。
-
-抓取口径：
-- 默认只抓「有效文档」：``assetType=DOCUMENT`` + ``lifecycleStatus=ACTIVE`` + ``qualityStatus=PASS``；
-  ``--any-quality`` 放宽质量状态，``--all-assets`` 抓取列表中的全部资产（不做任何过滤）；
-- **同一文档只抓第一份**：同一 ``displayPath`` 只保留列表中第一份，每份只在 ``versions`` 里取第一个版本；
-- 正文原样写成 ``.md``（按 ``displayPath`` 保留目录结构，UTF-8、LF）；
-- 正文为空、超过 ``--max-file-size``（默认 20 MB）或接口报错的资产不写入，属“漏取风险”，只在控制台提示。
-
-零配置的工程化能力（装好即用，不需要改本机任何设置）：
-
-- **并发抓取**：默认 8 个线程并行取「版本 + 正文」（``--workers`` 可调，``1`` 为单线程）；列表分页、
-  资产过滤与“同一文档只抓第一份”仍在单线程里按列表顺序判定，因此并发不会改变抓取结果；
-- **断点续跑**：默认跳过本地已存在且非空的 Markdown（``--overwrite`` 强制重抓）；中断后重跑只补缺口，
-  本地文件本身就是进度记录，不产生任何状态文件；
-- **失败自动补抓**：单个请求瞬断（超时 / 连接重置 / 5xx）自动退避重试（``--retries``，默认 3 次），
-  抓取结束再对仍失败的文档补抓若干轮；仍取不到的只计入“漏取风险”，不会让后续审查停摆；
-- **连接方式自适应**：默认对「直连」与「系统代理」各探测一次并选更快的那个（内网知识库走系统代理常常
-  慢到 ~9 秒/请求，直连通常 <0.1 秒），因此**不需要用户配置 ``no_proxy`` 等环境变量**；``--proxy`` 可指定；
-- **正文 URL 归一化**：``filePath`` 可能是完整 URL / 站点绝对路径 / 已含接口前缀的路径 / 相对路径，
-  一律补成可用地址再取，首个成功的写法会被记住并复用；
-- **错误体拒收**：接口出错时可能返回 200 + JSON / HTML 报错页；写入前拦截（``--keep-raw-content`` 关闭校验），
-  避免把“接口错误”当正文混进审查语料、污染质量报告；
-- **进度条**：列表遍历、正文抓取与后续审查/比对全程显示进度（非交互终端自动降级为分段整行日志）。
-
-用法：
-    python scripts/fetch_knowledge.py "https://kb.example.com/knowledge/asset" --token <token>
-    python scripts/fetch_knowledge.py <url> --token <token> --api-base "https://kb.example.com/api/v1"
-    python scripts/fetch_knowledge.py <url> --token <token> --output input/kb --limit 500
-    python scripts/fetch_knowledge.py <url> --token <token> --limit 0 --all-assets   # 全量抓取
-    python scripts/fetch_knowledge.py <url> --token <token> --limit 0 --workers 16  # 全量 + 16 线程并发
-    python scripts/fetch_knowledge.py <url> --token <token> --overwrite             # 忽略本地缓存强制重抓
-
-``--token`` 也可由环境变量 ``KB_ACCESS_TOKEN`` 提供；``--limit`` 默认 200（``0`` 表示不限制）；
-不指定 ``--output`` 时写入 ``output/_kb_source/<时间戳>/``。本步骤不生成 HTML / XLSX / JSON 文件，
-抓取结果可直接交给 ``audit_markdown.py`` / ``detect_conflicts.py`` / ``run_all.py``。
-退出码：0=完成（个别文档失败也算完成，失败项在控制台列入“漏取风险”）；1=网络或输入/输出错误；2=参数错误。
+默认只抓有效文档（assetType=DOCUMENT / lifecycleStatus=ACTIVE / qualityStatus=PASS），且同一文档只抓第一份；
+正文按 displayPath 保留目录结构写成 .md。默认并发、断点续跑、失败自动补抓、直连/系统代理自适应、
+拒收接口报错体——装好即用，无需改本机设置。本步骤不生成 HTML/XLSX/JSON，结果可直接交给审查脚本。
+退出码：0=完成（个别失败也算完成）；1=网络或输入/输出错误；2=参数错误。
 """
 from __future__ import annotations
 
@@ -357,11 +322,7 @@ class KnowledgeClient:
         raise last if last else KnowledgeApiError(f"请求失败：{url}")
 
     def detect_connection(self) -> str:
-        """连接方式自适应（零配置）：对「直连」与「系统代理」各探测一次，自动选更快的那个。
-
-        内网知识库常常“系统代理能通但绕路很慢”（实测可慢到 ~9 秒/请求），而直连往往 <0.1 秒；
-        两种方式各发一个 ``limit=1`` 的列表请求做探测，用户不需要去改本机的 ``no_proxy`` 等设置。
-        """
+        """连接方式自适应（零配置）：对「直连」与「系统代理」各探测一次并选更快的那个，用户无需改 no_proxy 等设置。"""
         self._connection_mode = ""
         if self.proxy == "direct":
             note = "强制直连（--proxy direct）"
@@ -612,11 +573,8 @@ def _run_fetch_tasks(
 ) -> Tuple[List[FetchOutcome], int]:
     """并发执行抓取任务，返回 ``(与 tasks 同序的结果, 补抓篇次)``。
 
-    - ``workers<=1`` 时顺序执行（便于排障与对拍）；
-    - 并发时每个线程只做「取版本 + 取正文 + 写盘」，结果按下标回填，主线程再按列表顺序统一计数，
-      因此**并发不改变抓取结果与统计口径**；
-    - 仍失败的文档补抓若干轮（上限 ``MAX_REFETCH_ROUNDS``，轮间指数退避），兜住“网络瞬断导致漏取、
-      甚至让后续审查停摆”的老问题。
+    workers<=1 时顺序执行；并发时结果按下标回填、主线程按列表顺序统一计数，故不改变抓取结果；
+    仍失败的文档补抓若干轮（上限 MAX_REFETCH_ROUNDS），兜住网络瞬断导致的漏取。
     """
     outcomes: List[Optional[FetchOutcome]] = [None] * len(tasks)
     pending = list(range(len(tasks)))
@@ -680,21 +638,14 @@ def fetch_documents(
     workers: int = DEFAULT_WORKERS,
     retries: int = DEFAULT_RETRIES,
     proxy: Optional[str] = None,
-    resume: bool = True,
     overwrite: bool = False,
     keep_raw_content: bool = False,
     show_progress: bool = True,
 ) -> Dict[str, Any]:
     """按抓取口径拉取文档并逐篇写入 output_dir，返回统计信息（不生成 JSON 文件）。
 
-    all_assets=True 时不做资产类型 / 生命周期 / 质量状态过滤（抓取列表中的全部资产）。
-
-    工程化约定（默认全部开启，用户不需要改本机设置）：
-
-    - 连接方式自适应（直连 / 系统代理取更快者）；单请求瞬断自动退避重试，结束后对失败文档补抓；
-    - 正文并发抓取（``workers`` 个线程），但列表分页 / 过滤 / “同一文档只抓第一份”仍在单线程按序判定，
-      因此结果与单线程完全一致；
-    - ``resume`` 且未 ``overwrite`` 时跳过本地已存在且非空的 Markdown（断点续跑）。
+    默认：连接方式自适应、单请求退避重试 + 结束后补抓、正文并发（列表分页/过滤/去重仍单线程按序判定，结果与单线程一致）、
+    断点续跑（未 overwrite 时跳过本地已存在且非空的 Markdown）。all_assets=True 时不做任何资产过滤。
     """
     client = KnowledgeClient(
         api_base, token, timeout, token_header, retries=retries, proxy=proxy, validate_content=not keep_raw_content
@@ -722,7 +673,7 @@ def fetch_documents(
     total_count = 0
 
     existing: Set[str] = set()
-    if resume and not overwrite:
+    if not overwrite:
         existing = scan_existing_documents(output_dir)
         if existing:
             safe_print(
@@ -882,16 +833,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         epilog=(
             "示例：\n"
             '  python scripts/fetch_knowledge.py "https://kb.example.com/knowledge/asset" --token <token>\n'
-            '  python scripts/fetch_knowledge.py <url> --token <token> --api-base "https://kb.example.com/api/v1"\n'
-            "  python scripts/fetch_knowledge.py <url> --token <token> --output input/kb --limit 500\n"
-            "  python scripts/fetch_knowledge.py <url> --token <token> --workspace 示例工作区\n"
-            "  python scripts/fetch_knowledge.py <url> --token <token> --limit 0 --all-assets\n"
-            "  python scripts/fetch_knowledge.py <url> --token <token> --limit 0 --workers 16\n"
-            "  python scripts/fetch_knowledge.py <url> --token <token> --overwrite      # 忽略本地缓存强制重抓\n"
-            "默认只抓有效文档（文档类型 / 有效状态 / 质量通过），**同一文档只抓第一份**；\n"
-            "默认并发 8 线程、断点续跑、自动重试与连接方式自适应（无需配置 no_proxy 等环境变量）；\n"
-            "--all-assets 抓取列表中的全部资产（不做过滤），配合 --limit 0 即全量抓取；\n"
-            "抓取结果逐篇写成 .md（按 displayPath 保留目录结构），可直接交给 run_all.py 审查。\n"
+            "  python scripts/fetch_knowledge.py <url> --token <token> --limit 0 --all-assets --workers 16\n"
+            "默认只抓有效文档、同一文档只抓第一份；默认并发、断点续跑、自动重试与连接方式自适应。\n"
             "退出码：0=完成；1=网络或输入/输出错误；2=参数错误。"
         ),
     )

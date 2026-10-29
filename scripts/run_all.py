@@ -1,36 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""run_all.py — 一条命令跑完整条审查流水线（全自动、无需人工介入）。
+"""run_all.py — 一条命令跑完整条审查流水线（全自动）。
 
-输入（二选一）：
-- 已转写为 Markdown 的知识库文件夹或单个 `.md` 文档；或
-- 一个在线知识库地址（`--url` + `--token`）：先自动抓取知识库中已转写好的 Markdown，再进入审查流程。
-
-依次执行（任一步骤失败即停止，已生成的报告不受影响）：
-0. fetch_knowledge.py    在线知识库抓取（仅 `--url` 时执行）→ 逐篇 Markdown（输入缓存，不是交付文件）
-1. audit_markdown.py     文档解析与转写质量审查 → HTML 报告 + XLSX 问题清单
-2. detect_conflicts.py   同一型号同类属性冲突比对 → HTML 报告 + XLSX 冲突清单
-
-每次运行都在输出根目录下新建带完整时间戳的子目录（`YYYYMMDD-HHMMSS`，同秒重复追加 `_2`、`_3`），
-4 个交付文件（2 个 HTML + 2 个 XLSX）全部放在该目录内；在线抓取的 Markdown 写入
-`output/_kb_source/<时间戳>/`（输入缓存，不计入交付文件）。
-
-用法：
-    python scripts/run_all.py                              # 不指定输入时默认用 input/（仓库内置演示语料）
-    python scripts/run_all.py input/
-    python scripts/run_all.py "D:/知识库" --output output
-    python scripts/run_all.py --url "https://kb.example.com/knowledge/asset" --token <x-access-token>
-    python scripts/run_all.py --url <url> --token <token> --limit 0 --all-assets   # 全量抓取后审查
-    python scripts/run_all.py input/ --fail-on-issue       # 发现问题时退出码 3，便于 CI 卡口
-    python scripts/run_all.py 空目录/ --allow-empty        # 空语料也出报告（默认空输入以退出码 1 结束）
-
-退出码：0=完成；1=输入/输出错误（含“未匹配到任何 Markdown”）；2=规则或参数错误；3=完成但发现问题（仅 --fail-on-issue 时）。
-结束时会对交付目录做一次自检（复用 check_deliverables 的判定：2 个 HTML 报告 + 2 个 XLSX 清单表格），
-自检不通过只打印警告、不改变退出码。
-
-在线抓取默认开箱即用（不需要改本机任何设置）：并发抓取、断点续跑、失败自动补抓、连接方式自适应
-（不必配置 no_proxy 等环境变量）、正文错误体拒收；只有“一篇都没抓到”才中止流水线，个别文档漏取
-只提示不停摆（需要强一致时加 --strict-fetch）。抓取与各审查阶段在交互式终端都显示进度条。
+输入三选一：Markdown 目录、单个 .md、或用 --url 指定在线知识库列表页（先抓取再审查；不给输入时默认用 input/）。
+依次执行：在线抓取（仅 --url）→ 转写质量审查 → 同一型号属性冲突比对 → 交付自检。
+每次运行在输出根目录下新建时间戳子目录，固定产出 4 个交付文件（2 HTML + 2 XLSX）；在线抓取结果写入
+<输出根目录>/_kb_source/<url哈希>/ 作为输入缓存，不计入交付文件。退出码：0=完成；1=输入/输出错误；
+2=规则或参数错误；3=完成但发现问题（仅 --fail-on-issue）。在线抓取默认并发、断点续跑、失败补抓、连接自适应。
 """
 from __future__ import annotations
 
@@ -74,128 +50,45 @@ def build_arg_parser() -> argparse.ArgumentParser:
         epilog=(
             "示例：\n"
             "  python scripts/run_all.py input/\n"
-            "  python scripts/run_all.py input/ --output output --fail-on-issue\n"
-            "  python scripts/run_all.py --url \"https://kb.example.com/knowledge/asset\" --token <x-access-token>\n"
-            "  python scripts/run_all.py --url <url> --token <token> --api-base \"https://kb.example.com/api/v1\"\n"
-            "  python scripts/run_all.py --url <url> --token <token> --limit 0 --all-assets\n"
-            "\n"
-            "每次运行在 --output 下新建带时间戳的子目录，2 个 HTML 报告 + 2 个 XLSX 清单表格写入其中；\n"
-            "用 --url 时先在线抓取已转写好的 Markdown（默认只抓有效文档、同一文档只抓第一份；\n"
-            "--all-assets 抓取列表中的全部资产），抓取结果写入 <输出根目录>/_kb_source/<时间戳>/。\n"
+            '  python scripts/run_all.py --url "https://kb.example.com/knowledge/asset" --token <token>\n'
+            "  python scripts/run_all.py input/ --fail-on-issue     # 发现问题时退出码 3\n"
             "退出码：0=完成；1=输入/输出错误；2=规则或参数错误；3=完成但发现问题（仅 --fail-on-issue）。"
         ),
     )
-    parser.add_argument(
-        "input",
-        nargs="?",
-        default=None,
-        help="待审查的 Markdown 文件或目录（与 --url 二选一；都不给时默认用 input/）",
-    )
-    parser.add_argument(
-        "--url",
-        default=None,
-        help="在线知识库列表页地址（如 https://kb.example.com/knowledge/asset）；给出后先抓取 Markdown 再审查",
-    )
-    parser.add_argument(
-        "--token",
-        default=None,
-        help=f"知识库访问令牌（请求头默认 {fetch_knowledge.TOKEN_HEADER_DEFAULT}）；也可用环境变量 {fetch_knowledge.TOKEN_ENV}",
-    )
-    parser.add_argument(
-        "--token-header",
-        default=fetch_knowledge.TOKEN_HEADER_DEFAULT,
-        help=f"令牌请求头名（默认 {fetch_knowledge.TOKEN_HEADER_DEFAULT}）",
-    )
-    parser.add_argument(
-        "--api-base",
-        default=None,
-        help=f"接口根地址（默认：站点根 + {fetch_knowledge.API_PREFIX_DEFAULT}，可指向自己的服务）",
-    )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=fetch_knowledge.DEFAULT_LIMIT,
-        help=f"在线抓取最多下载篇数（0 表示不限制，默认 {fetch_knowledge.DEFAULT_LIMIT}）",
-    )
-    parser.add_argument("--workspace", default=None, help="在线抓取限定工作区（工作区名称或 workspaceId）")
-    parser.add_argument(
-        "--any-quality",
-        action="store_true",
-        help="在线抓取不检查质量状态（默认只抓质量通过的文档）",
-    )
-    parser.add_argument(
-        "--all-assets",
-        action="store_true",
-        help="在线抓取列表中的全部资产（不做资产类型 / 生命周期 / 质量状态过滤）",
-    )
-    parser.add_argument(
-        "--kb-output",
-        default=None,
-        help="在线抓取的 Markdown 写入目录（默认 <输出根目录>/_kb_source/<时间戳>）",
-    )
-    parser.add_argument(
-        "--output",
-        default="output",
-        help="输出根目录；每次运行在其下新建带时间戳的子目录（默认：output）",
-    )
-    parser.add_argument(
-        "--report-name",
-        default=audit_markdown.DEFAULT_REPORT_BASE_NAME,
-        help="质量审查报告基名（默认：知识库文档解析与转写质量问题报告）",
-    )
-    parser.add_argument(
-        "--max-file-size",
-        type=int,
-        default=audit_markdown.DEFAULT_MAX_FILE_SIZE,
-        help="单文件大小上限（字节，默认 20MB），超过则跳过内容检查",
-    )
-    parser.add_argument("--rules", default=None, help="文本异常规则 JSON（默认：rules/ocr_patterns.json）")
-    parser.add_argument("--alias-rules", default=None, help="属性别名与单位规则 JSON（默认：rules/attribute_aliases.json）")
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=fetch_knowledge.DEFAULT_WORKERS,
-        help=f"在线抓取并发线程数（默认 {fetch_knowledge.DEFAULT_WORKERS}，1 表示单线程）",
-    )
-    parser.add_argument(
-        "--retries",
-        type=int,
-        default=fetch_knowledge.DEFAULT_RETRIES,
-        help=f"在线抓取单请求失败后的重试次数（默认 {fetch_knowledge.DEFAULT_RETRIES}，抓完还会补抓若干轮）",
-    )
-    parser.add_argument(
-        "--proxy",
-        default=None,
-        help="在线抓取代理方式：auto（默认，自动选更快的直连 / 系统代理）/ direct / system / <host:port 或 URL>",
-    )
-    parser.add_argument(
-        "--overwrite",
-        action="store_true",
-        help="在线抓取忽略本地已存在的 Markdown 强制重抓（默认断点续跑：中断后重跑只补缺口）",
-    )
-    parser.add_argument(
-        "--strict-fetch",
-        action="store_true",
-        help="在线抓取有任何一篇漏取即中止流水线（默认：漏取只提示，审查照常进行）",
-    )
-    parser.add_argument(
-        "--timeout",
-        type=int,
-        default=fetch_knowledge.DEFAULT_TIMEOUT,
-        help=f"在线抓取接口超时秒数（默认 {fetch_knowledge.DEFAULT_TIMEOUT}）",
-    )
-    parser.add_argument(
-        "--keep-raw-content",
-        action="store_true",
-        help="在线抓取不校验正文（默认拒收 JSON / HTML 接口错误体，避免污染审查语料）",
-    )
-    parser.add_argument(
-        "--allow-empty",
-        action="store_true",
-        help="输入没匹配到任何 Markdown 时也继续生成报告（默认以退出码 1 结束，避免空语料被误读成“没问题”）",
-    )
-    parser.add_argument("--no-progress", action="store_true", help="关闭进度条（默认在交互式终端显示）")
+    parser.add_argument("input", nargs="?", default=None,
+                        help="待审查的 Markdown 文件或目录（与 --url 二选一；都不给时默认用 input/）")
+    parser.add_argument("--output", default="output", help="输出根目录；每次运行在其下新建时间戳子目录（默认 output）")
+    parser.add_argument("--report-name", default=audit_markdown.DEFAULT_REPORT_BASE_NAME,
+                        help="质量审查报告基名（默认：知识库文档解析与转写质量问题报告）")
+    parser.add_argument("--max-file-size", type=int, default=audit_markdown.DEFAULT_MAX_FILE_SIZE,
+                        help="单文件大小上限（字节，默认 20MB），超过则跳过内容检查")
+    parser.add_argument("--rules", default=None, help="文本异常规则 JSON（默认 rules/ocr_patterns.json）")
+    parser.add_argument("--alias-rules", default=None, help="属性别名与单位规则 JSON（默认 rules/attribute_aliases.json）")
+    parser.add_argument("--allow-empty", action="store_true", help="输入为空时也生成报告（默认以退出码 1 结束）")
     parser.add_argument("--fail-on-issue", action="store_true", help="发现问题时以退出码 3 结束")
+    parser.add_argument("--no-progress", action="store_true", help="关闭进度条")
+
+    online = parser.add_argument_group("在线知识库抓取（--url）")
+    online.add_argument("--url", default=None, help="在线知识库列表页地址（如 https://kb.example.com/knowledge/asset）")
+    online.add_argument("--token", default=None,
+                        help=f"访问令牌（请求头默认 {fetch_knowledge.TOKEN_HEADER_DEFAULT}）；也可用环境变量 {fetch_knowledge.TOKEN_ENV}")
+    online.add_argument("--token-header", default=fetch_knowledge.TOKEN_HEADER_DEFAULT, help="令牌请求头名")
+    online.add_argument("--api-base", default=None,
+                        help=f"接口根地址（默认：站点根 + {fetch_knowledge.API_PREFIX_DEFAULT}）")
+    online.add_argument("--limit", type=int, default=fetch_knowledge.DEFAULT_LIMIT,
+                        help=f"最多抓取篇数（0 不限，默认 {fetch_knowledge.DEFAULT_LIMIT}）")
+    online.add_argument("--workspace", default=None, help="限定工作区（名称或 workspaceId）")
+    online.add_argument("--any-quality", action="store_true", help="放宽质量状态（默认只抓质量通过的文档）")
+    online.add_argument("--all-assets", action="store_true", help="抓取列表内全部资产（不做任何过滤）")
+    online.add_argument("--kb-output", default=None, help="抓取 Markdown 的写入目录（默认 <输出根目录>/_kb_source/<url哈希>）")
+    online.add_argument("--workers", type=int, default=fetch_knowledge.DEFAULT_WORKERS,
+                        help=f"正文并发线程数（默认 {fetch_knowledge.DEFAULT_WORKERS}，1 为单线程）")
+    online.add_argument("--retries", type=int, default=fetch_knowledge.DEFAULT_RETRIES, help="单请求失败重试次数")
+    online.add_argument("--proxy", default=None, help="代理方式：auto（默认）/ direct / system / <host:port 或 URL>")
+    online.add_argument("--overwrite", action="store_true", help="忽略本地缓存强制重抓")
+    online.add_argument("--strict-fetch", action="store_true", help="任一文档漏取即中止流水线")
+    online.add_argument("--timeout", type=int, default=fetch_knowledge.DEFAULT_TIMEOUT, help="接口超时秒数")
+    online.add_argument("--keep-raw-content", action="store_true", help="不校验正文（默认拒收 JSON/HTML 接口错误体）")
     return parser
 
 
@@ -291,14 +184,6 @@ def resolve_input(args: argparse.Namespace, output_root: Path) -> Tuple[Optional
     return input_path, 0
 
 
-def check_deliverable_files(run_dir: Path) -> Tuple[List[str], List[str]]:
-    """交付物自检：复用 check_deliverables 的判定逻辑（避免两处数量口径漂移）；自检结果只提示，不改退出码。"""
-    try:
-        return check_deliverables.inspect(run_dir, EXPECT_HTML, EXPECT_XLSX)
-    except OSError as exc:
-        return [f"无法读取交付目录：{exc}"], []
-
-
 def run(argv: Optional[List[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
     output_root = Path(args.output).expanduser()
@@ -359,7 +244,10 @@ def run(argv: Optional[List[str]] = None) -> int:
             worst = 3
 
     safe_print(f"[run_all] 流水线完成，交付目录：{run_dir}")
-    problems, files = check_deliverable_files(run_dir)
+    try:
+        problems, files = check_deliverables.inspect(run_dir, EXPECT_HTML, EXPECT_XLSX)
+    except OSError as exc:
+        problems, files = [f"无法读取交付目录：{exc}"], []
     if problems:
         safe_print("[run_all] [警告] 交付物自检未通过：" + "；".join(problems))
         safe_print(f"[run_all]   目录内现有文件：{files}")

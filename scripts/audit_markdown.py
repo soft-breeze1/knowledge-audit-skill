@@ -1,24 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""audit_markdown.py — 知识库 Markdown 文档解析与转写质量审查（第一阶段，只读审计）。
+"""audit_markdown.py — Markdown 转写质量审查（只读）。
 
-输入：Markdown 文件夹（递归扫描 `.md` / `.markdown`）或单个 Markdown 文件；不需要原始 DOCX/PDF/图片。
-每次运行产出两份交付文件（写入同一个目录，不修改任何输入文件）：
-
-    <报告基名>.html   单文件 HTML 报告（内联样式、无外部资源，双击即可打开或转发）
-    <报告基名>.xlsx   逐行问题清单表格（文件、行号、问题类型、问题说明、证据原文）
-
-检查口径 = 固定 6 项检查（口径见 CHECK_ITEMS）：
-    编码可解码性（UTF-8） / 替换字符 U+FFFD / 编码乱码特征 / OCR 标记残留 / 占位符文本 / 空文件检测
-
-每处问题都能定位到“文件 + 行号 + 证据原文”；文件读取失败、超过单文件大小上限属“漏审风险”，
-不算质量问题，仅在控制台提示并列入 HTML 报告的运行信息。全流程不生成 Markdown / JSON 文件。
-
-用法：
-    python scripts/audit_markdown.py input/
-    python scripts/audit_markdown.py input/example.md --output out
-
-退出码：0=正常完成（可能发现问题）；1=输入/输出错误；2=参数或规则文件错误；3=发现问题且 --fail-on-issue。
+输入 Markdown 目录或单个文件，产出两份交付文件（HTML 报告 + XLSX 逐行清单），不修改输入、不生成 MD/JSON。
+检查口径固定为 CHECK_ITEMS 的 6 项；结构性写法不上报，读取失败/超限属“漏审风险”，只提示并写入报告运行信息。
+退出码：0=完成（可能发现问题）；1=输入/输出错误；2=参数或规则错误；3=发现问题且 --fail-on-issue。
 """
 
 from __future__ import annotations
@@ -40,26 +26,23 @@ if str(SCRIPT_DIR) not in sys.path:
 from generate_report import (  # noqa: E402
     TOOL_VERSION,
     Progress,
+    build_html,
     count_by,
+    details,
+    esc,
+    kpi_cards,
     make_timestamped_dir,
     now_local_str,
     now_utc_iso,
     print_error,
     relative_path,
     safe_print,
+    section,
+    table,
     truncate_text,
     window_text,
     write_text_file,
     write_xlsx_file,
-)
-
-from html_report import (  # noqa: E402
-    build_html,
-    details,
-    esc,
-    kpi_cards,
-    section,
-    table,
 )
 
 TOOL_NAME = "audit_markdown"
@@ -1013,17 +996,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         epilog=(
             "示例：\n"
             "  python scripts/audit_markdown.py input/example.md\n"
-            "  python scripts/audit_markdown.py input/                     # 输出到 output/<时间戳>/\n"
-            "  python scripts/audit_markdown.py input/ --output out\n"
-            "\n"
-            "报告默认写入 output/ 下带完整时间戳的子目录；显式指定 --output 时直接写入该目录。\n"
-            "每次产出两份交付文件：HTML 报告（便于阅读）+ XLSX 清单表格（逐行问题清单，Excel / WPS 直接打开，"
-            "表头配色、列宽、冻结首行、自动筛选）；不生成 Markdown / JSON。\n"
-            "检查口径固定为 6 项检查（编码可解码性（UTF-8）、替换字符 U+FFFD、编码乱码特征、OCR 标记残留、"
-            "占位符文本、空文件检测）；问题全部计入「存在问题文件数 / 问题总数」并逐行写入清单表格；"
-            "表格结构、空章节、代码块未闭合、疑似文本截断等写法不在检查口径内。\n"
-            "退出码：0=正常完成（可能发现问题）；1=输入/输出错误；2=参数或规则文件错误；"
-            "3=发现问题且指定了 --fail-on-issue。"
+            "  python scripts/audit_markdown.py input/            # 输出到 output/<时间戳>/\n"
+            "报告默认写入 output/<时间戳>/；每次产出 HTML 报告 + XLSX 清单表格，不生成 Markdown / JSON。\n"
+            "检查口径固定为 6 项检查，全部计入统计并逐行写入清单表格。\n"
+            "退出码：0=完成；1=输入/输出错误；2=参数或规则错误；3=发现问题且 --fail-on-issue。"
         ),
     )
     parser.add_argument("input", help="待审查的 Markdown 文件或目录")
