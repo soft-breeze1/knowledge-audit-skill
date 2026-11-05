@@ -4,7 +4,7 @@
 
 **知识库质量审查 · Agent Skill**
 
-一条命令查两类问题：文档转写质量、同型号属性冲突<br/>
+一条命令查两类问题：文档转写质量 · 同型号属性冲突<br/>
 结论均带证据定位（文件 / 行号 / 证据原文）· 只读输入 · 零第三方依赖
 
 [![Python](https://img.shields.io/badge/Python-3.9%2B-3772ab?logo=python&logoColor=white)](https://www.python.org/)
@@ -19,12 +19,11 @@
 
 ## 目录
 
-- [特性](#特性)
 - [快速开始](#快速开始)
 - [检查什么](#检查什么)
 - [交付物](#交付物)
-- [在线抓取（可选）](#在线抓取可选)
 - [安装](#安装)
+- [在线抓取（可选）](#在线抓取可选)
 - [命令行](#命令行)
 - [口径](#口径)
 - [规则配置](#规则配置)
@@ -32,22 +31,13 @@
 - [常见问题](#常见问题)
 - [版本](#版本)
 
-## 特性
-
-- **两类客观审查**：① 转写质量（固定 6 项检查，可选 `--extra-rules` 扩为 9 项）；② 同一型号同类属性取值冲突（支持单位换算、属性别名合并、"列=型号/行=参数"横表，以及范围/多值须逐位一致）。
-- **证据可复核**：每条结论都定位到「文件 + 行号 + 证据原文」。
-- **只读、零依赖**：仅用 Python 标准库，不修改任何输入文档。
-- **开箱即用**：一条命令跑完整流程，自动生成带样式的 HTML / XLSX 交付物。
-- **在线可用**：给 `--url` + `--token` 即先抓取知识库存量 Markdown 再审查（并发、断点续跑、失败补抓、连接自适应）。
-
 ## 快速开始
 
-输入是**已经转写好的 Markdown**，不需要原始 DOCX / PDF / 图片。
+输入是**已经转写好的 Markdown**，不需要原始 DOCX / PDF / 图片。Python 3.9+，无需第三方依赖。
 
 ```bash
-# 下载/克隆本仓库后，在仓库根目录执行：
-
-python scripts/run_all.py          # 不给输入时默认用 input/（内置演示语料）
+# 在仓库根目录执行
+python scripts/run_all.py          # 默认审查 input/（内置演示语料）
 # 结果在 output/<时间戳>/，打开两份 HTML 即可
 ```
 
@@ -55,7 +45,7 @@ python scripts/run_all.py          # 不给输入时默认用 input/（内置演
 
 ```bash
 python scripts/run_all.py input/ --fail-on-issue                 # 发现问题时退出码 3（CI 卡口）
-python scripts/run_all.py input/ --extra-rules                   # 额外开启 HTML实体/字面转义/Markdown残留 规则（默认关）
+python scripts/run_all.py input/ --extra-rules                   # 追加 HTML实体/字面转义/Markdown残留 规则（默认关）
 python scripts/run_all.py --url "<知识库地址>" --token "<token>"   # 在线知识库：先抓取再审查
 python scripts/audit_markdown.py input/                          # 只跑 ① 转写质量审查
 python scripts/detect_conflicts.py input/                        # 只跑 ② 属性冲突比对
@@ -85,7 +75,52 @@ python scripts/detect_conflicts.py input/                        # 只跑 ② �
 | `知识库同类属性冲突审查报告.html` | 比对概况，每组冲突的来源文档、行号、取值描述、证据 |
 | `知识库同类属性冲突审查报告.xlsx` | 逐行清单：冲突编号、型号、属性、描述、来源文档、行号、证据原文 |
 
-HTML 单文件、样式内联，双击即开可直接转发；XLSX 表头着色、列宽、斑马纹、首行冻结并开启自动筛选。
+HTML 单文件、样式内联，双击即开、可直接转发；XLSX 表头着色、列宽、斑马纹、首行冻结并开启自动筛选。
+
+## 安装
+
+遵循 [Agent Skills 开放标准](https://agentskills.io/specification)：一个目录即一个技能，至少含 `SKILL.md`；本技能还需要同级的 `scripts/` 与 `rules/`。
+
+**安装 = 把仓库根目录的 `SKILL.md` + `scripts/` + `rules/` 放进目标技能目录。** 仓库里 `.claude/skills/knowledge-audit/` 只是同步好的 `SKILL.md` 副本，直接拿它并不完整，请按下面命令组装。
+
+| 使用方式 | 技能目录（放入 `SKILL.md` + `scripts/` + `rules/`） |
+| --- | --- |
+| CCSwitch（Windows 图形化） | `%USERPROFILE%\.claude\skills\knowledge-audit\` |
+| Claude Code · 个人级（所有项目） | `~/.claude/skills/knowledge-audit/` |
+| Claude Code · 项目级 | `<你的项目>/.claude/skills/knowledge-audit/` |
+| Codex · 项目级 | `<你的项目>/.agents/skills/knowledge-audit/` |
+
+**组装技能目录**——Windows PowerShell（装成 Claude Code 个人级为例）：
+
+```powershell
+$dst = "$env:USERPROFILE\.claude\skills\knowledge-audit"
+New-Item -ItemType Directory -Force -Path "$dst\scripts","$dst\rules" | Out-Null
+Copy-Item SKILL.md  "$dst\SKILL.md"
+Copy-Item scripts\*.py "$dst\scripts\"
+Copy-Item rules\*.json "$dst\rules\"
+```
+
+macOS / Linux / Git Bash：
+
+```bash
+DST=~/.claude/skills/knowledge-audit
+mkdir -p "$DST/scripts" "$DST/rules"
+cp SKILL.md "$DST/"
+cp scripts/*.py "$DST/scripts/"
+cp rules/*.json "$DST/rules/"
+```
+
+> 装到别的目录（项目级 / Codex）时，把 `$dst` / `DST` 换成上表对应路径即可。
+
+**CCSwitch**：其「Skills」页管理的就是本地技能目录（默认 `%USERPROFILE%\.claude\skills\`）。组装到该目录后，回到 Skills 页点「添加 Skill」「添加」（从本地目录指向该目录）或「检查更新」自动识别，再勾选要启用的客户端。
+
+**Claude Code**：个人级装到 `~/.claude/skills/knowledge-audit/`，项目级装到 `<项目>/.claude/skills/knowledge-audit/`（随项目提交）。启动 `claude` 后用自然语言触发（“帮我用 knowledge-audit 审查 `input/` 的转写质量”），或显式 `/knowledge-audit <目录>`。
+
+**Codex**：装到仓库内 `.agents/skills/knowledge-audit/`（Codex 会扫描 `.agents/skills/`），个人级放 `~/.agents/skills/knowledge-audit/`（以你的 Codex 配置为准）。
+
+**验证与升级**：技能目录里能看到 `SKILL.md`、`scripts/`、`rules/` 三样，进入目录跑 `python scripts/run_all.py <含 .md 的目录>` 能产出 4 个交付文件即成功；升级时 `git pull` 后重新覆盖这三样即可。
+
+> 根目录 `SKILL.md` 是唯一真源，`.claude/`、`.agents/` 下是同步副本。改完执行 `python scripts/sync_skill.py`，校验用 `python scripts/sync_skill.py --check`。
 
 ## 在线抓取（可选）
 
@@ -104,75 +139,6 @@ HTML 单文件、样式内联，双击即开可直接转发；XLSX 表头着色�
 
 列表分页、资产过滤与「同一文档只抓第一份」按列表顺序单线程判定，并发只用于取正文，结果与单线程一致。接口返回 200 但正文是 JSON / HTML 报错页时会被拒收并单独计数。
 
-## 安装
-
-本技能遵循 [Agent Skills 开放标准](https://agentskills.io/specification)：一个目录即一个技能，至少含 `SKILL.md`；本技能还需要同级的 `scripts/` 与 `rules/`。
-
-**安装 = 把仓库根目录的 `SKILL.md` + `scripts/` + `rules/` 放进目标技能目录。** 仓库里 `.claude/skills/knowledge-audit/` 只是同步好的 `SKILL.md` 副本，直接拿它并不完整，请按下面的命令组装。
-
-各客户端的技能目录：
-
-| 使用方式 | 技能目录（放入 `SKILL.md` + `scripts/` + `rules/`） |
-| --- | --- |
-| CCSwitch（Windows 图形化） | `%USERPROFILE%\.claude\skills\knowledge-audit\` |
-| Claude Code · 个人级（所有项目） | `~/.claude/skills/knowledge-audit/` |
-| Claude Code · 项目级 | `<你的项目>/.claude/skills/knowledge-audit/` |
-| Codex · 项目级 | `<你的项目>/.agents/skills/knowledge-audit/` |
-
-### 1. 先组装技能目录
-
-**Windows PowerShell**（在仓库根目录执行，装成 Claude Code 个人级为例）：
-
-```powershell
-$dst = "$env:USERPROFILE\.claude\skills\knowledge-audit"
-New-Item -ItemType Directory -Force -Path "$dst\scripts","$dst\rules" | Out-Null
-Copy-Item SKILL.md  "$dst\SKILL.md"
-Copy-Item scripts\*.py "$dst\scripts\"
-Copy-Item rules\*.json "$dst\rules\"
-```
-
-**macOS / Linux / Git Bash**：
-
-```bash
-DST=~/.claude/skills/knowledge-audit
-mkdir -p "$DST/scripts" "$DST/rules"
-cp SKILL.md "$DST/"
-cp scripts/*.py "$DST/scripts/"
-cp rules/*.json "$DST/rules/"
-```
-
-> 装到别的目录（项目级 / Codex）时，把 `$dst` / `DST` 换成上表对应的路径即可。
-
-### 2. CCSwitch
-
-CCSwitch 的「Skills」页管理的就是本地技能目录（默认 `%USERPROFILE%\.claude\skills\`）。
-
-1. 按上一步组装到该目录；
-2. 回到 CCSwitch → Skills 页 → 点右上角 **「添加 Skill」「添加」**（选“从本地目录”指向该目录），或点 **「检查更新」** 让它自动识别；
-3. 在列表里给 `knowledge-audit` 勾选要启用的客户端（Claude Code / Claude Desktop 等）。
-
-### 3. Claude Code
-
-- **个人级（所有项目可用）**：组装到 `~/.claude/skills/knowledge-audit/`；
-- **项目级（只对该项目生效）**：组装到 `<项目>/.claude/skills/knowledge-audit/`，随项目一起提交。
-
-启动 `claude` 后即可用自然语言触发，例如：
-
-> 帮我用 knowledge-audit 审查 `input/` 这批 Markdown 的转写质量
-
-也可以显式调用 `/knowledge-audit <目录>`。
-
-### 4. Codex
-
-把技能组装到 Git 仓库内的 `.agents/skills/knowledge-audit/`（Codex 会扫描仓库里的 `.agents/skills/`）；个人级可放到 `~/.agents/skills/knowledge-audit/`（以你的 Codex 配置为准）。之后在会话中描述任务即可触发。
-
-### 验证与升级
-
-- **验证**：技能目录里应能看到 `SKILL.md`、`scripts/`、`rules/` 三样；进入该目录运行 `python scripts/run_all.py <一个含 .md 的目录>` 能产出 4 个交付文件即安装成功。
-- **升级**：仓库更新后，重新执行「先组装技能目录」的复制命令即可（`git pull` 后覆盖 `SKILL.md`、`scripts/`、`rules/`）。
-
-> 根目录 `SKILL.md` 是唯一真源，`.claude/`、`.agents/` 下是同步副本。改完执行 `python scripts/sync_skill.py`，校验用 `python scripts/sync_skill.py --check`。
-
 ## 命令行
 
 `run_all.py`（推荐入口）：
@@ -184,6 +150,7 @@ CCSwitch 的「Skills」页管理的就是本地技能目录（默认 `%USERPROF
 | `--report-name` | `知识库文档解析与转写质量问题报告` | 质量审查报告基名 |
 | `--rules` / `--alias-rules` | `rules/ocr_patterns.json` / `rules/attribute_aliases.json` | 规则文件 |
 | `--max-file-size` | 20 MB | 单文件上限，超过则跳过内容级检查 |
+| `--extra-rules` | 关闭 | 追加 HTML 实体 / 字面转义 / Markdown 残留 3 项转写规则（检查项 6→9） |
 | `--fail-on-issue` | 关闭 | 发现问题时以退出码 3 结束 |
 | `--allow-empty` | 关闭 | 目录内无 Markdown 时也出报告（默认退出码 1，避免空语料被误读成“没问题”） |
 
@@ -201,9 +168,9 @@ CCSwitch 的「Skills」页管理的就是本地技能目录（默认 `%USERPROF
 
 ## 口径
 
-**转写质量（固定 6 项）**：编码可解码性（UTF-8）、替换字符 U+FFFD、编码乱码特征、OCR 标记残留、占位符文本、空文件检测。6 项问题全部计入统计并逐行写入清单。表格结构、空章节、代码块未闭合、疑似截断等结构性写法不上报；代码块内只查替换字符与乱码特征。读取失败或超过大小上限的文件属“漏审风险”，不计入统计，只在控制台与报告运行信息里提示。
+**转写质量**：固定 6 项——编码可解码性（UTF-8）、替换字符 U+FFFD、编码乱码特征、OCR 标记残留、占位符文本、空文件检测；加 `--extra-rules` 时追加 HTML 实体残留 / 字面转义残留 / Markdown 残留 3 项（共 9 项）。全部计入统计并逐行写入清单。表格结构、空章节、代码块未闭合、疑似截断等结构性写法不上报；代码块内只查替换字符与乱码特征。读取失败或超过大小上限的文件属“漏审风险”，不计入统计，只在控制台与报告运行信息里提示。
 
-**属性冲突**：分组键为「型号 + 属性 + 工况」完全一致才比较，型号按原文精确匹配并保留变型词（`ABCDEF-100 HEV` ≠ `ABCDEF-100`）；列为冲突需取值不一致且来自 ≥2 个不同文件。抽取是规则式的（非语义理解）：只认两列表、“属性-取值-单位”列组表、正文 `属性：数值+单位`；标识类字段、故障排查表、备件清单、版本履历表、范围 / 多维复合取值不抽取。
+**属性冲突**：分组键为「型号 + 属性 + 工况」完全一致才比较，型号按原文精确匹配并保留变型词（`ABCDEF-100 HEV` ≠ `ABCDEF-100`）；列为冲突需取值不一致且来自 ≥2 个不同文件。抽取是规则式的（非语义理解）：认两列表、“属性-取值-单位”列组表、“列=型号/行=参数”的横表，以及正文 `属性：数值+单位`；范围 / 多值按逐位比较（全部数字一致才算一致）；标识类字段、故障排查表、备件清单、版本履历表不抽取。
 
 ## 规则配置
 
