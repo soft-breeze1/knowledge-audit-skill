@@ -17,28 +17,6 @@
 > 输入三选一：Markdown 文件夹 · 单个 `.md` 文档 · 在线知识库地址（配访问令牌自动抓取）。
 > 每次运行固定产出 <strong style="color:#2563eb">4 个文件</strong>（2 份 HTML 报告 + 2 份 XLSX 清单），不修改输入、不生成 Markdown / JSON。
 
-## 快速开始
-
-输入是**已经转写好的 Markdown**，不需要原始 DOCX / PDF / 图片。Python 3.9+，无需第三方依赖。
-
-```bash
-# 在仓库根目录执行
-python scripts/run_all.py          # 默认审查 input/（内置演示语料）
-# 结果在 output/<时间戳>/，打开两份 HTML 即可
-```
-
-常用变体：
-
-```bash
-python scripts/run_all.py input/ --fail-on-issue                 # 发现问题时退出码 3（CI 卡口）
-python scripts/run_all.py input/ --extra-rules                   # 追加 HTML实体/字面转义/Markdown残留 规则（默认关）
-python scripts/run_all.py --url "<知识库地址>" --token "<token>"   # 在线知识库：先抓取再审查
-python scripts/audit_markdown.py input/                          # 只跑 ① 转写质量审查
-python scripts/detect_conflicts.py input/                        # 只跑 ② 属性冲突比对
-```
-
-`input/` 是虚构的演示语料：`example.md` 覆盖各类转写缺陷，`products/` 下两份 `机器ABCDEF-100` 留了一处冲突。预期结果见 [`input/README.md`](input/README.md)。
-
 ## 🔍 检查什么
 
 | 常见问题 | 对应审查 |
@@ -107,6 +85,28 @@ cp rules/*.json "$DST/rules/"
 **验证与升级**：技能目录里能看到 `SKILL.md`、`scripts/`、`rules/` 三样，进入目录跑 `python scripts/run_all.py <含 .md 的目录>` 能产出 4 个交付文件即成功；升级时 `git pull` 后重新覆盖这三样即可。
 
 > 根目录 `SKILL.md` 是唯一真源，`.claude/`、`.agents/` 下是同步副本。改完执行 `python scripts/sync_skill.py`，校验用 `python scripts/sync_skill.py --check`。
+
+## 快速开始
+
+输入是**已经转写好的 Markdown**，不需要原始 DOCX / PDF / 图片。Python 3.9+，无需第三方依赖。
+
+```bash
+# 在仓库根目录执行
+python scripts/run_all.py          # 默认审查 input/（内置演示语料）
+# 结果在 output/<时间戳>/，打开两份 HTML 即可
+```
+
+常用变体：
+
+```bash
+python scripts/run_all.py input/ --fail-on-issue                 # 发现问题时退出码 3（CI 卡口）
+python scripts/run_all.py input/ --extra-rules                   # 追加 HTML实体/字面转义/Markdown残留 规则（默认关）
+python scripts/run_all.py --url "<知识库地址>" --token "<token>"   # 在线知识库：先抓取再审查
+python scripts/audit_markdown.py input/                          # 只跑 ① 转写质量审查
+python scripts/detect_conflicts.py input/                        # 只跑 ② 属性冲突比对
+```
+
+`input/` 是虚构的演示语料：`example.md` 覆盖各类转写缺陷，`products/` 下两份 `机器ABCDEF-100` 留了一处冲突。预期结果见 [`input/README.md`](input/README.md)。
 
 ## 🌐 在线抓取（可选）
 
