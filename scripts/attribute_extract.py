@@ -399,6 +399,25 @@ def find_value_column_groups(header_cells: List[str]) -> List[Tuple[int, int, Op
     return groups
 
 
+def detect_model_columns(header_cells: List[str]) -> List[Tuple[int, str]]:
+    """识别“列=型号、行=参数”的多列对照表：表头里除首列外、有多列单元格是型号名。
+
+    返回 [(列下标, 型号名), ...]；仅当识别到 **≥2 个型号列** 时才认定为横表（单个型号列多是
+    普通单机型规格表，避免误判）。首列（参数名列）以及“单位/取值”列表头不参与判定。
+    """
+    columns: List[Tuple[int, str]] = []
+    for idx, cell in enumerate(header_cells):
+        if idx < 1:
+            continue
+        text = (cell or "").strip()
+        if not text or "单位" in text or is_value_header(text):
+            continue
+        token = find_model_token(text)
+        if token:
+            columns.append((idx, token))
+    return columns if len(columns) >= 2 else []
+
+
 def extract_table_unit_hint(header_cells: List[str]) -> str:
     """从表头提取整表单位提示（如“单位mm”“单位：/km/h”），供排版型表格的相邻标签-数值对使用。"""
     for cell in header_cells:
@@ -423,27 +442,68 @@ def iter_adjacent_value_pairs(cells: List[str]) -> List[Tuple[str, str]]:
     return [(compact[idx], compact[idx + 1]) for idx in range(len(compact) - 1)]
 
 
-def parse_value_text(value_text: str, value_regex: "re.Pattern[str]") -> Optional[Dict[str, Any]]:
-    """解析取值文本：数值+可选单位；取值不完整（日期、范围、多维尺寸等）时返回 None。"""
-    m = value_regex.match(value_text)
-    if not m or not m.group("num"):
+_MULTI_NUM_RE = re.compile(r"(?<![A-Za-z0-9.])\d+(?:\.\d+)?")
+_MULTI_GAP_OK = re.compile(r"^[\sA-Za-zμ°℃%‰³²/·×xX*~～\-至到,，、]*$")
+
+
+def _parse_multi_value(value_text: str) -> Optional[Dict[str, Any]]:
+    """解析范围 / 多值 / 多维尺寸：如 ``100~120``、``100×200×300``、``100/110 mm``。
+
+    返回 ``{value_number, values, unit_raw, value_raw}``；不是“纯数值序列”（数字间只夹分隔符/
+    空白/单位）时返回 None。``values`` 保留全部数字（含顺序）——因为一致性判定要求“完全相同”，
+    任一个数字不同即视为不一致，所以不能只取第一个数字。
+    """
+    s = (value_text or "").strip()
+    if not s:
         return None
-    rest = m.group("rest") or ""
-    if rest:
-        if rest[0] not in _VALUE_TERMINATORS:
-            return None
-        if rest.strip().startswith(("×", "x", "X", "~", "～")):
-            return None  # 范围或多维尺寸：只取局部会失真，放弃该条
-    num = float(m.group("num"))
-    if num.is_integer():
-        num = int(num)
-    unit = (m.group("unit") or "").strip()
-    end = m.end("unit") if unit else m.end("num")
-    return {
-        "value_number": num,
-        "unit_raw": unit,
-        "value_raw": value_text[:end].strip(),
-    }
+    matches = list(_MULTI_NUM_RE.finditer(s))
+    if len(matches) < 2:
+        return None
+    segments: List[Tuple[str, str]] = []
+    prev = 0
+    for m in matches:
+        segments.append(("gap", s[prev:m.start()]))
+        segments.append(("num", m.group(0)))
+        prev = m.end()
+    segments.append(("gap", s[prev:]))
+    unit = ""
+    for kind, seg in segments:
+        if kind != "gap":
+            continue
+        if not _MULTI_GAP_OK.match(seg):
+            return None  # 数字之间夹了说明性文字，非纯数值序列
+        for u in re.findall(r"[A-Za-zμ°℃%‰³²/·]+", seg):
+            if u and not unit:
+                unit = u
+    values: List[Any] = []
+    for m in matches:
+        v = float(m.group(0))
+        values.append(int(v) if v.is_integer() else v)
+    return {"value_number": values[0], "values": values, "unit_raw": unit, "value_raw": s}
+
+
+def parse_value_text(value_text: str, value_regex: "re.Pattern[str]") -> Optional[Dict[str, Any]]:
+    """解析取值文本：数值+可选单位；范围/多值解析为多值列表（values），无法识别时返回 None。"""
+    m = value_regex.match(value_text)
+    if m and m.group("num"):
+        rest = m.group("rest") or ""
+        if rest:
+            if rest[0] not in _VALUE_TERMINATORS:
+                return _parse_multi_value(value_text)  # 首个数字后紧跟范围/多值分隔符
+            if rest.strip().startswith(("×", "x", "X", "~", "～")):
+                return _parse_multi_value(value_text)
+        num = float(m.group("num"))
+        if num.is_integer():
+            num = int(num)
+        unit = (m.group("unit") or "").strip()
+        end = m.end("unit") if unit else m.end("num")
+        return {
+            "value_number": num,
+            "values": [num],
+            "unit_raw": unit,
+            "value_raw": value_text[:end].strip(),
+        }
+    return _parse_multi_value(value_text)
 
 
 def compute_fenced_lines(lines: List[str]) -> Set[int]:
@@ -515,10 +575,12 @@ def _handle_candidate(
     value_regex: "re.Pattern[str]",
     reverse_alias: Dict[str, str],
     table_unit_hint: str = "",
+    model_override: str = "",
 ) -> None:
     """处理一个候选“属性=取值”：识别型号类属性或解析数值+单位，成功则记录。
 
     table_unit_hint 为整表单位提示（表头里的“单位mm”），仅在属性名自身不带单位时兜底使用。
+    model_override 用于“列=型号”横表：本记录的型号取所在列的型号，而非整文件的型号。
     """
     name = clean_attribute_name(attr_raw)
     name, unit_hint = split_attribute_unit(name)
@@ -560,26 +622,32 @@ def _handle_candidate(
         return
     normalized, condition, base = normalize_attribute(name, reverse_alias)
     unit_norm, dimension, factor = normalize_unit(parsed["unit_raw"], rules)
+    values = parsed.get("values") or [parsed["value_number"]]
     canonical_unit = ""
-    canonical_value = None
+    canonical_values = None
     if dimension is not None and factor is not None:
         canonical_unit = str(rules.get("units", {}).get(dimension, {}).get("canonical", ""))
-        canonical_value = round(parsed["value_number"] * factor, 10)
-        if canonical_value == int(canonical_value):
-            canonical_value = int(canonical_value)
+        canonical_values = []
+        for v in values:
+            cv = round(float(v) * factor, 10)
+            canonical_values.append(int(cv) if cv == int(cv) else cv)
+    canonical_value = canonical_values[0] if canonical_values else None
     _append_record(
         entry,
         {
             "kind": "numeric",
+            "model": model_override,
             "attribute_raw": name,
             "attribute_base": base,
             "attribute_normalized": normalized,
             "condition": condition,
             "value_raw": parsed["value_raw"],
+            "values": values,
             "value_number": parsed["value_number"],
             "unit_raw": parsed["unit_raw"],
             "unit_normalized": unit_norm,
             "dimension": dimension,
+            "canonical_values": canonical_values,
             "canonical_value": canonical_value,
             "canonical_unit": canonical_unit,
         },
@@ -627,6 +695,20 @@ def extract_from_file(
         table_lines.add(header_no + 1)
         for row_no, _cells in rows:
             table_lines.add(row_no)
+        # 横表（列=型号、行=参数）：表头有多列型号名时，逐列按“属性=该型号取值”抽取
+        model_cols = [] if is_non_attribute_table(header_cells) else detect_model_columns(header_cells)
+        if model_cols:
+            horiz_unit = extract_table_unit_hint(header_cells)
+            for row_no, cells in rows:
+                attr_raw = cells[0] if cells else ""
+                for col_i, model_name in model_cols:
+                    if col_i >= len(cells):
+                        continue
+                    _handle_candidate(
+                        entry, attr_raw, cells[col_i], row_no, "表格横表", lines[row_no - 1],
+                        rules, value_regex, reverse_alias, horiz_unit, model_override=model_name,
+                    )
+            continue
         groups = [
             g
             for g in find_value_column_groups(header_cells)

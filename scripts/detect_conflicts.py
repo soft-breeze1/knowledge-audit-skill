@@ -50,25 +50,52 @@ def _values_equal(a: Any, b: Any) -> bool:
     return math.isclose(float(a), float(b), rel_tol=REL_TOL, abs_tol=ABS_TOL)
 
 
+def _rec_values(rec: Dict[str, Any]) -> List[float]:
+    """取一条记录的数值列表：优先多值 values，回退单值 value_number。"""
+    vals = rec.get("values")
+    if isinstance(vals, list) and vals:
+        return [float(x) for x in vals]
+    v = rec.get("value_number")
+    return [float(v)] if v is not None else []
+
+
+def _lists_equal(a: List[float], b: List[float]) -> bool:
+    """多值逐位完全相同才算一致：长度不同 → 不一致；任一对应元素不等 → 不一致。"""
+    if len(a) != len(b):
+        return False
+    return all(_values_equal(x, y) for x, y in zip(a, b))
+
+
 def compare_values(members: List[Tuple[Dict[str, Any], Dict[str, Any]]]) -> Tuple[bool, str]:
-    """比较同组内多条取值，返回 (是否不一致, 比较口径说明)。members 至少 2 条。"""
+    """比较同组内多条取值，返回 (是否不一致, 比较口径说明)。members 至少 2 条。
+
+    一致性判定严格：多值/范围必须逐位完全相同，任一个数字不同即判为不一致。
+    """
     dims = {rec.get("dimension") for _, rec in members}
     if None not in dims and len(dims) == 1:
         canonical_unit = members[0][1].get("canonical_unit") or ""
-        values = [rec.get("canonical_value") for _, rec in members]
-        if all(v is not None for v in values):
-            same = all(_values_equal(values[0], v) for v in values[1:])
-            return (not same), f"各方单位均收录于规则表，已换算为 {canonical_unit} 后比较。"
+        lists: List[List[float]] = []
+        for _f, rec in members:
+            cv = rec.get("canonical_values")
+            if isinstance(cv, list) and cv:
+                lists.append([float(x) for x in cv])
+            elif rec.get("canonical_value") is not None:
+                lists.append([float(rec["canonical_value"])])
+            else:
+                lists.append([])
+        if all(lists):
+            same = all(_lists_equal(lists[0], lst) for lst in lists[1:])
+            return (not same), f"各方单位均收录于规则表，已换算为 {canonical_unit} 后比较（多值需逐位完全相同）。"
     units = {rec.get("unit_normalized") or "" for _, rec in members}
     if len(units) == 1:
         unit = next(iter(units))
-        values = [rec.get("value_number") for _, rec in members]
-        if all(v is not None for v in values):
-            same = all(_values_equal(values[0], v) for v in values[1:])
+        lists = [_rec_values(rec) for _, rec in members]
+        if all(lists):
+            same = all(_lists_equal(lists[0], lst) for lst in lists[1:])
             if unit:
-                basis = f"单位 {unit} 未收录于规则表，按相同单位的数值字面比较。"
+                basis = f"单位 {unit} 未收录于规则表，按相同单位的数值字面比较（多值需逐位完全相同）。"
             else:
-                basis = "各方均未标注单位，按数值字面比较（若原文实际单位不同，此口径可能不成立）。"
+                basis = "各方均未标注单位，按数值字面比较（多值需逐位完全相同；若原文实际单位不同，此口径可能不成立）。"
             return (not same), basis
     values_text = [str(rec.get("value_raw") or "").strip() for _, rec in members]
     basis = "各方单位不一致或缺失、无法换算，按原始取值字面比较。"
@@ -108,10 +135,12 @@ def build_conflicts(
     single_source = 0
     no_model = 0
     for fentry in data["files"]:
-        model = str(fentry.get("model") or "").strip()
+        file_model = str(fentry.get("model") or "").strip()
         for rec in fentry.get("attributes", []):
             if rec.get("kind") != "numeric":
                 continue
+            # 横表：每条记录自带所在列的型号；普通记录回退到整文件型号
+            model = str(rec.get("model") or file_model).strip()
             if not model:
                 no_model += 1
                 continue
@@ -178,8 +207,10 @@ def _serialize_member(fentry: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, 
         "context": rec.get("context", ""),
         "attribute_raw": rec.get("attribute_raw", ""),
         "value_raw": rec.get("value_raw", ""),
+        "values": rec.get("values"),
         "value_number": rec.get("value_number"),
         "unit_normalized": rec.get("unit_normalized", ""),
+        "canonical_values": rec.get("canonical_values"),
         "canonical_value": rec.get("canonical_value"),
         "canonical_unit": rec.get("canonical_unit", ""),
         "evidence": rec.get("evidence", ""),
@@ -207,8 +238,9 @@ def build_report_data(input_path: Path, extraction: Dict[str, Any]) -> Dict[str,
             "未识别型号的记录，以及只有单一来源的记录不参与比较，数量见“比对概况”。",
             "列入门槛：同一「型号+属性名+工况」下取值不一致（即「相同属性但描述不一致」），且证据必须来自 **≥2 个不同文件**；"
             "同一文件内重复出现的记录（同一处证据、同文档不同章节复述）只算单一来源，不列入。",
-            "抽取为规则式（非语义理解）：只识别“属性-取值”表（两列，或含独立“单位”列），以及列表/正文的"
-            "“属性：数值+单位”模式；代码块、多列对照表、故障排查表、清单表不抽取。",
+            "抽取为规则式（非语义理解）：识别“属性-取值”表（两列，或含独立“单位”列）、"
+            "“列=型号/行=参数”的多列对照表（横表），以及列表/正文的“属性：数值+单位”模式；"
+            "代码块、故障排查表、清单表不抽取。",
             "本工具只读取 Markdown 文本，不读取、不对照原始文档（DOCX/PDF/图片）。",
         ],
     }
@@ -231,12 +263,16 @@ SHEET_NUMERIC_COLS: Tuple[int, ...] = (5,)  # 行号按数字右对齐
 
 
 def _describe_value(member: Dict[str, Any]) -> str:
-    """把「原始取值 + 换算后取值」合并为一句描述；未发生单位换算时只给原始取值。"""
+    """把「原始取值 + 换算后取值」合并为一句描述；多值时逐位展示；未换算时只给原始取值。"""
     raw = str(member.get("value_raw") or "").strip()
-    canonical = member.get("canonical_value")
-    if canonical is None:
+    canon_unit = member.get("canonical_unit") or ""
+    canon_vals = member.get("canonical_values")
+    if isinstance(canon_vals, list) and canon_vals:
+        canon = ("~".join(str(x) for x in canon_vals) + f" {canon_unit}").strip() if len(canon_vals) > 1 else f"{canon_vals[0]} {canon_unit}".strip()
+    elif member.get("canonical_value") is not None:
+        canon = f"{member.get('canonical_value')} {canon_unit}".strip()
+    else:
         return raw
-    canon = f"{canonical} {member.get('canonical_unit') or ''}".strip()
     if not raw or raw == canon:
         return canon
     return f"{raw}（换算后 {canon}）"
