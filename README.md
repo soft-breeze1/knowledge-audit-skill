@@ -34,7 +34,7 @@
 
 ## 特性
 
-- **两类客观审查**：① 转写质量（固定 6 项检查）；② 同一型号同类属性取值冲突（支持单位换算与属性别名合并）。
+- **两类客观审查**：① 转写质量（固定 6 项检查，可选 `--extra-rules` 扩为 9 项）；② 同一型号同类属性取值冲突（支持单位换算、属性别名合并、"列=型号/行=参数"横表，以及范围/多值须逐位一致）。
 - **证据可复核**：每条结论都定位到「文件 + 行号 + 证据原文」。
 - **只读、零依赖**：仅用 Python 标准库，不修改任何输入文档。
 - **开箱即用**：一条命令跑完整流程，自动生成带样式的 HTML / XLSX 交付物。
@@ -55,6 +55,7 @@ python scripts/run_all.py          # 不给输入时默认用 input/（内置演
 
 ```bash
 python scripts/run_all.py input/ --fail-on-issue                 # 发现问题时退出码 3（CI 卡口）
+python scripts/run_all.py input/ --extra-rules                   # 额外开启 HTML实体/字面转义/Markdown残留 规则（默认关）
 python scripts/run_all.py --url "<知识库地址>" --token "<token>"   # 在线知识库：先抓取再审查
 python scripts/audit_markdown.py input/                          # 只跑 ① 转写质量审查
 python scripts/detect_conflicts.py input/                        # 只跑 ② 属性冲突比对

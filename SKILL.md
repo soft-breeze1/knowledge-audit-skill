@@ -55,13 +55,13 @@ python scripts/detect_conflicts.py <目录或.md>                  # ② 属性�
 
 ## 常用参数
 
-质量与冲突：`--output`（输出根目录）、`--report-name`、`--rules`（文本异常规则）、`--alias-rules`（别名与单位规则）、`--max-file-size`（默认 20MB）、`--allow-empty`、`--fail-on-issue`、`--no-progress`。
+质量与冲突：`--output`（输出根目录）、`--report-name`、`--rules`（文本异常规则）、`--alias-rules`（别名与单位规则）、`--max-file-size`（默认 20MB）、`--allow-empty`、`--fail-on-issue`、`--no-progress`、`--extra-rules`（可选，开启后追加 HTML 实体 / 字面转义 / Markdown 残留 三类扩展转写规则，检查项 6→9；默认关闭）。
 
 在线抓取（`--url`，run_all 与 fetch_knowledge 通用）：`--token` / `KB_ACCESS_TOKEN`、`--token-header`（默认 `x-access-token`）、`--api-base`（默认站点根 + `/api/v1`）、`--limit`（默认 200，0 不限）、`--workspace`、`--any-quality`、`--all-assets`、`--workers`（默认 8）、`--retries`（默认 3）、`--proxy`（`auto`/`direct`/`system`/地址）、`--overwrite`、`--timeout`、`--keep-raw-content`；`--strict-fetch`（仅 run_all：任一漏取即中止）。
 
 ## 检查口径（规则式，非语义推断）
 
-**转写质量（固定 6 项检查，分类即检查项）**：编码可解码性（UTF-8） / 替换字符 U+FFFD / 编码乱码特征 / OCR 标记残留 / 占位符文本 / 空文件检测。6 项问题**全部**计入「存在问题文件数 / 问题总数」并逐行写入清单；表格列数/空单元格、空章节、代码块未闭合、疑似截断、图片引用、标题格式等**结构性写法不上报**；代码块内只查替换字符与乱码特征。读取失败或超大小上限属“漏审风险”，不计入统计，只在控制台提示并写入 HTML 运行信息。
+**转写质量（固定 6 项检查，分类即检查项）**：编码可解码性（UTF-8） / 替换字符 U+FFFD / 编码乱码特征 / OCR 标记残留 / 占位符文本 / 空文件检测。6 项问题**全部**计入「存在问题文件数 / 问题总数」并逐行写入清单；表格列数/空单元格、空章节、代码块未闭合、疑似截断、图片引用、标题格式等**结构性写法不上报**；代码块内只查替换字符与乱码特征。读取失败或超大小上限属“漏审风险”，不计入统计，只在控制台提示并写入 HTML 运行信息。默认 6 项；加 `--extra-rules` 时额外启用「HTML 实体残留 / 字面转义残留 / Markdown 残留」3 项（共 9 项）。
 
 **属性冲突**：分组键「型号 + 属性 + 工况」完全一致才比较；型号按原文精确匹配并保留变型词（`ABCDEF-100 HEV` ≠ `ABCDEF-100`）；**取值不一致且证据来自 ≥2 个不同文件**才列入。抽取只认两列表、“属性-取值-单位”列组表（单位列在前或后、支持左右并排多组）、排版表相邻“标签-数值”对、正文 `属性：数值+单位`；单位按 `rules/attribute_aliases.json` 换算、属性按同义词合并；标识类字段（物料编码/零件号/序号）、故障排查表、备件清单、版本履历表、范围/多维复合取值不抽取；未识别型号或单一来源不参与比对（报告只给数量）。
 
