@@ -15,21 +15,7 @@
 </div>
 
 > 输入三选一：Markdown 文件夹 · 单个 `.md` 文档 · 在线知识库地址（配访问令牌自动抓取）。
-> 每次运行固定产出 **4 个文件**（2 份 HTML 报告 + 2 份 XLSX 清单），不修改输入、不生成 Markdown / JSON。
-
-## 目录
-
-- [快速开始](#快速开始)
-- [检查什么](#检查什么)
-- [交付物](#交付物)
-- [安装](#安装)
-- [在线抓取（可选）](#在线抓取可选)
-- [命令行](#命令行)
-- [口径](#口径)
-- [规则配置](#规则配置)
-- [CI](#ci)
-- [常见问题](#常见问题)
-- [版本](#版本)
+> 每次运行固定产出 <strong style="color:#2563eb">4 个文件</strong>（2 份 HTML 报告 + 2 份 XLSX 清单），不修改输入、不生成 Markdown / JSON。
 
 ## 快速开始
 
@@ -53,7 +39,7 @@ python scripts/detect_conflicts.py input/                        # 只跑 ② �
 
 `input/` 是虚构的演示语料：`example.md` 覆盖各类转写缺陷，`products/` 下两份 `机器ABCDEF-100` 留了一处冲突。预期结果见 [`input/README.md`](input/README.md)。
 
-## 检查什么
+## 🔍 检查什么
 
 | 常见问题 | 对应审查 |
 | --- | --- |
@@ -62,11 +48,11 @@ python scripts/detect_conflicts.py input/                        # 只跑 ② �
 
 - 只报问题、不设分级，性质判断交给人；
 - 规则与单位换算在 `rules/*.json`，报告会写明检查项、规则来源与生成时间；
-- 冲突只认来自 **≥2 个不同文件** 的不一致，同一文件内重复不算。
+- 冲突只认来自 <strong style="color:#d1242f">≥2 个不同文件</strong> 的不一致，同一文件内重复不算。
 
-## 交付物
+## 📦 交付物
 
-每次运行在 `output/<YYYYMMDD-HHMMSS>/` 固定产出 4 个文件，一次任务一个目录、互不覆盖：
+每次运行在 `output/<YYYYMMDD-HHMMSS>/` 固定产出 <strong style="color:#2563eb">4 个文件</strong>，一次任务一个目录、互不覆盖：
 
 | 文件 | 内容 |
 | --- | --- |
@@ -77,11 +63,11 @@ python scripts/detect_conflicts.py input/                        # 只跑 ② �
 
 HTML 单文件、样式内联，双击即开、可直接转发；XLSX 表头着色、列宽、斑马纹、首行冻结并开启自动筛选。
 
-## 安装
+## 🛠️ 安装
 
 遵循 [Agent Skills 开放标准](https://agentskills.io/specification)：一个目录即一个技能，至少含 `SKILL.md`；本技能还需要同级的 `scripts/` 与 `rules/`。
 
-**安装 = 把仓库根目录的 `SKILL.md` + `scripts/` + `rules/` 放进目标技能目录。** 仓库里 `.claude/skills/knowledge-audit/` 只是同步好的 `SKILL.md` 副本，直接拿它并不完整，请按下面命令组装。
+<strong style="color:#2563eb">安装</strong> = 把仓库根目录的 `SKILL.md` + `scripts/` + `rules/` 放进目标技能目录。仓库里 `.claude/skills/knowledge-audit/` 只是同步好的 `SKILL.md` 副本，直接拿它并不完整，请按下面命令组装。
 
 | 使用方式 | 技能目录（放入 `SKILL.md` + `scripts/` + `rules/`） |
 | --- | --- |
@@ -122,7 +108,7 @@ cp rules/*.json "$DST/rules/"
 
 > 根目录 `SKILL.md` 是唯一真源，`.claude/`、`.agents/` 下是同步副本。改完执行 `python scripts/sync_skill.py`，校验用 `python scripts/sync_skill.py --check`。
 
-## 在线抓取（可选）
+## 🌐 在线抓取（可选）
 
 给 `--url` + `--token` 时，先抓取知识库中已转写好的 Markdown，再进入审查。抓取结果作为**输入缓存**写入 `output/_kb_source/kb-<hash>/`，不计入交付文件；重跑默认断点续跑，只补缺口。
 
@@ -139,7 +125,7 @@ cp rules/*.json "$DST/rules/"
 
 列表分页、资产过滤与「同一文档只抓第一份」按列表顺序单线程判定，并发只用于取正文，结果与单线程一致。接口返回 200 但正文是 JSON / HTML 报错页时会被拒收并单独计数。
 
-## 命令行
+## ⌨️ 命令行
 
 `run_all.py`（推荐入口）：
 
@@ -166,13 +152,13 @@ cp rules/*.json "$DST/rules/"
 
 退出码：`0` 完成；`1` 输入 / 输出错误（含网络失败、未匹配到 Markdown）；`2` 参数或规则错误；`3` 完成但发现问题（仅 `--fail-on-issue`）。
 
-## 口径
+## 📐 口径
 
-**转写质量**：固定 6 项——编码可解码性（UTF-8）、替换字符 U+FFFD、编码乱码特征、OCR 标记残留、占位符文本、空文件检测；加 `--extra-rules` 时追加 HTML 实体残留 / 字面转义残留 / Markdown 残留 3 项（共 9 项）。全部计入统计并逐行写入清单。表格结构、空章节、代码块未闭合、疑似截断等结构性写法不上报；代码块内只查替换字符与乱码特征。读取失败或超过大小上限的文件属“漏审风险”，不计入统计，只在控制台与报告运行信息里提示。
+**转写质量**：固定 <strong style="color:#1a7f37">6 项</strong>——编码可解码性（UTF-8）、替换字符 U+FFFD、编码乱码特征、OCR 标记残留、占位符文本、空文件检测；加 `--extra-rules` 时追加 HTML 实体残留 / 字面转义残留 / Markdown 残留 3 项（<strong style="color:#1a7f37">共 9 项</strong>）。全部计入统计并逐行写入清单。表格结构、空章节、代码块未闭合、疑似截断等结构性写法不上报；代码块内只查替换字符与乱码特征。读取失败或超过大小上限的文件属“漏审风险”，不计入统计，只在控制台与报告运行信息里提示。
 
 **属性冲突**：分组键为「型号 + 属性 + 工况」完全一致才比较，型号按原文精确匹配并保留变型词（`ABCDEF-100 HEV` ≠ `ABCDEF-100`）；列为冲突需取值不一致且来自 ≥2 个不同文件。抽取是规则式的（非语义理解）：认两列表、“属性-取值-单位”列组表、“列=型号/行=参数”的横表，以及正文 `属性：数值+单位`；范围 / 多值按逐位比较（全部数字一致才算一致）；标识类字段、故障排查表、备件清单、版本履历表不抽取。
 
-## 规则配置
+## ⚙️ 规则配置
 
 两份都是普通 JSON，改完即生效，文件缺失或无法解析时回退内置精简规则。
 
@@ -194,7 +180,7 @@ cp rules/*.json "$DST/rules/"
 
 用 `--rules` / `--alias-rules` 指定自定义规则文件；显式指定但不可用时退出码 2。
 
-## CI
+## ✅ CI
 
 `--fail-on-issue` 把“发现问题”变成可卡口的构建失败。仓库自带 [`.github/workflows/knowledge-audit.yml`](.github/workflows/knowledge-audit.yml)，在 Ubuntu / Windows × Python 3.9 / 3.12 上跑演示语料，校验 `SKILL.md` 副本一致性与交付文件数量，并上传报告。
 
@@ -206,7 +192,7 @@ cp rules/*.json "$DST/rules/"
 
 在线模式需把令牌（如 `KB_ACCESS_TOKEN`）配成仓库 Secret。
 
-## 常见问题
+## ❓ 常见问题
 
 **会改我的文档吗？要装依赖吗？能审 DOCX / PDF 吗？**
 不改、不装依赖。输入全程只读，只用标准库。本技能只审**已经转写好的 Markdown**，不解析原始 DOCX / PDF / 图片，也不承诺“转写内容与原始文档逐字一致”。
@@ -217,7 +203,7 @@ cp rules/*.json "$DST/rules/"
 **我明明看到不一致，报告里却没有？**
 按顺序自查：型号是否与原文完全一致；属性名是否归一到同一标准名（`rules/attribute_aliases.json`）；工况限定词（额定 / 最大 / 最小 / 尾部括注）是否一致；证据是否来自 ≥2 个文件。仍不确定时，用两个 `.md` 组成最小语料单独跑一次最容易定位。
 
-## 版本
+## 🏷️ 版本
 
 | 版本 | 变化 |
 | --- | --- |
@@ -233,6 +219,6 @@ cp rules/*.json "$DST/rules/"
 
 改口径后的回归建议：跑一遍 `input/` 核对预期结果 → `python scripts/sync_skill.py` → 提交。
 
-## 许可证
+## 📄 许可证
 
 MIT，见 [LICENSE](LICENSE)。可自由用于商业与个人项目，保留版权声明即可。
