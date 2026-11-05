@@ -109,6 +109,49 @@
         "description": "UTF-8 被误按 Latin-1 解码的常见乱码特征（如“中/一/文/是/的/型/，”损坏后的形态）",
         "suggested_action": "该文本疑似用错误编码打开过，需按正确编码（UTF-8）重新转写此段内容。"
       }
+    ],
+    "html_entities": [
+      {
+        "id": "html-entity",
+        "pattern": "&(?:[a-zA-Z]{2,10}|#\\d{1,6}|#x[0-9a-fA-F]{1,6});",
+        "description": "未还原的 HTML 实体（如 &nbsp; &amp; &#160;）",
+        "suggested_action": "将 HTML 实体还原为对应字符（如 &nbsp;→空格、&amp;→&），或从原始文档重新转写。"
+      },
+      {
+        "id": "html-br-tag",
+        "pattern": "<\\s*(?:br|p|div|span|td|tr|table|li|ul|ol)\\b[^>]{0,80}>",
+        "flags": ["IGNORECASE"],
+        "description": "残留的 HTML 标签（如 <br> <p> <td>）",
+        "suggested_action": "删除残留 HTML 标签，改用 Markdown 语法表达同等结构。"
+      }
+    ],
+    "escape_residue": [
+      {
+        "id": "escape-newline",
+        "pattern": "\\\\[ntr]",
+        "description": "字面转义序列残留（如文本中出现字面 \\n、\\t、\\r 而非真正换行/制表）",
+        "suggested_action": "将字面转义序列还原为真正的换行/制表符，或删除多余转义。"
+      },
+      {
+        "id": "escape-unicode",
+        "pattern": "\\\\u[0-9a-fA-F]{4}",
+        "description": "字面 Unicode 转义残留（如 \\u4e2d 而非“中”）",
+        "suggested_action": "将 \\uXXXX 转义还原为对应字符，或从原始文档重新转写。"
+      }
+    ],
+    "markdown_residue": [
+      {
+        "id": "md-empty-link",
+        "pattern": "\\[\\s*\\]\\(\\s*\\)",
+        "description": "空的 Markdown 链接残留（[]()）",
+        "suggested_action": "补全链接文字与地址，或删除空链接。"
+      },
+      {
+        "id": "md-empty-emphasis",
+        "pattern": "__\\s*__",
+        "description": "空的 Markdown 强调标记残留（空的 __ __）",
+        "suggested_action": "补全强调内容或删除多余标记。"
+      }
     ]
   }
 }

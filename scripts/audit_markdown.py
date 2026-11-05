@@ -17,7 +17,7 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Set, Tuple
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -100,19 +100,42 @@ CHECK_ITEMS: Tuple[Tuple[str, str, str], ...] = (
     ),
 )
 
-# 检查项名称（报告与清单表格的「问题类型」列直接用这个名称）
-CHECK_NAMES: Dict[str, str] = {type_id: name for type_id, name, _desc in CHECK_ITEMS}
+# 可选扩展检查项（默认关闭，仅 --extra-rules 时并入检查口径与报告分布）
+EXTRA_CHECK_ITEMS: Tuple[Tuple[str, str, str], ...] = (
+    (
+        "html_entity",
+        "HTML 实体残留",
+        "转写未还原的 HTML 实体，如 &nbsp; &amp; &#160;（规则见 rules/ocr_patterns.json 的 html_entities，需 --extra-rules 启用）",
+    ),
+    (
+        "escape_residue",
+        "字面转义残留",
+        "转义序列未被还原，如字面 \\n、\\t、\\\\（规则见 escape_residue，需 --extra-rules 启用）",
+    ),
+    (
+        "markdown_residue",
+        "Markdown 残留",
+        "未成对的 ** / __、孤立竖线等 Markdown 语法残留（规则见 markdown_residue，需 --extra-rules 启用）",
+    ),
+)
+
+# 检查项名称（报告与清单表格的「问题类型」列直接用这个名称）；包含扩展项映射，便于标签解析
+CHECK_NAMES: Dict[str, str] = {
+    type_id: name for type_id, name, _desc in (CHECK_ITEMS + EXTRA_CHECK_ITEMS)
+}
 
 
-def checks_summary() -> str:
-    """6 项检查的一句话摘要（用于报告说明与控制台提示）。"""
-    names = "、".join(CHECK_NAMES[type_id] for type_id, _name, _desc in CHECK_ITEMS)
-    return f"共 {len(CHECK_ITEMS)} 项检查：{names}"
+def checks_summary(items: Optional[Sequence[Tuple[str, str, str]]] = None) -> str:
+    """检查口径的一句话摘要（用于报告说明与控制台提示）；items 缺省为默认 6 项。"""
+    items = CHECK_ITEMS if items is None else tuple(items)
+    names = "、".join(name for _type_id, name, _desc in items)
+    return f"共 {len(items)} 项检查：{names}"
 
 
-def check_items_scope() -> List[Dict[str, str]]:
+def check_items_scope(enable_extra: bool = False) -> List[Dict[str, str]]:
     """检查项清单（报告“范围与限制说明”与运行信息用）：[{id, name, description}, ...]。"""
-    return [{"id": type_id, "name": name, "description": desc} for type_id, name, desc in CHECK_ITEMS]
+    items = CHECK_ITEMS + EXTRA_CHECK_ITEMS if enable_extra else CHECK_ITEMS
+    return [{"id": type_id, "name": name, "description": desc} for type_id, name, desc in items]
 
 
 @dataclass
@@ -203,6 +226,13 @@ CATEGORY_ISSUE_TYPE = {
     "mojibake": "mojibake",
 }
 
+# 可选扩展规则（默认关闭，仅在用户显式 --extra-rules 时启用）：覆盖更广的转写残留形态。
+EXTRA_CATEGORY_ISSUE_TYPE = {
+    "html_entities": "html_entity",
+    "escape_residue": "escape_residue",
+    "markdown_residue": "markdown_residue",
+}
+
 
 @dataclass
 class PatternRule:
@@ -243,17 +273,22 @@ def _compile_flags(flag_names: Any) -> int:
     return flags
 
 
-def _parse_rules(raw_rules: Dict[str, Any], notes: List[str]) -> List[PatternRule]:
+def _parse_rules(raw_rules: Dict[str, Any], notes: List[str],
+                 category_map: Optional[Dict[str, str]] = None) -> List[PatternRule]:
     """把 ``{类别: [规则, ...]}`` 编译为规则列表。
 
     单条规则有问题（缺 pattern、flags 写法不支持、正则编译失败）只跳过该条并把原因写入 notes，
-    不影响同一类别里的其余规则，也不再让整条流水线中止。
+    不影响同一类别里的其余规则，也不再让整条流水线中止。``category_map`` 决定识别哪些类别
+    （默认 ``CATEGORY_ISSUE_TYPE``；启用扩展规则时并入 ``EXTRA_CATEGORY_ISSUE_TYPE``）。
     """
+    category_map = CATEGORY_ISSUE_TYPE if category_map is None else category_map
     rules: List[PatternRule] = []
     for category, entries in raw_rules.items():
-        issue_type = CATEGORY_ISSUE_TYPE.get(str(category))
+        issue_type = category_map.get(str(category))
         if issue_type is None:
-            notes.append(f"未识别的规则类别 {category}（可用：{'、'.join(sorted(CATEGORY_ISSUE_TYPE))}）")
+            # 扩展类别在未启用时静默跳过，不当作“未识别”噪声写入 notes
+            if str(category) not in EXTRA_CATEGORY_ISSUE_TYPE:
+                notes.append(f"未识别的规则类别 {category}（可用：{'、'.join(sorted(category_map))}）")
             continue
         if not isinstance(entries, list):
             notes.append(f"规则类别 {category} 不是数组")
@@ -280,7 +315,7 @@ def _parse_rules(raw_rules: Dict[str, Any], notes: List[str]) -> List[PatternRul
     return rules
 
 
-def load_rules(rules_path: Optional[Path], explicit: bool) -> Tuple[List[PatternRule], str]:
+def load_rules(rules_path: Optional[Path], explicit: bool, enable_extra: bool = False) -> Tuple[List[PatternRule], str]:
     """加载文本异常规则，返回 (规则列表, 来源说明)。
 
     宽容策略（一条规则写错不让整条流水线停摆）：
@@ -288,7 +323,12 @@ def load_rules(rules_path: Optional[Path], explicit: bool) -> Tuple[List[Pattern
     - 未识别的类别、非数组的类别 → 跳过并写入来源说明，不再静默丢弃；
     - 文件缺失 / 无法解析 / 一条规则都加载不到：默认路径回退内置兜底规则并在报告中注明原因；
       显式指定 ``--rules`` 时抛异常（CLI 以退出码 2 结束）。
+
+    ``enable_extra=True`` 时并入可选扩展规则类别（HTML 实体 / 字面转义 / Markdown 残留），默认不启用。
     """
+    category_map = dict(CATEGORY_ISSUE_TYPE)
+    if enable_extra:
+        category_map.update(EXTRA_CATEGORY_ISSUE_TYPE)
     notes: List[str] = []
     if rules_path is None or not Path(rules_path).is_file():
         if explicit:
@@ -307,7 +347,7 @@ def load_rules(rules_path: Optional[Path], explicit: bool) -> Tuple[List[Pattern
             source = f"内置兜底规则（{rules_path} 无法解析：{exc}）"
 
     raw_rules: Any = data.get("rules", {}) if isinstance(data, dict) else {}
-    if isinstance(data, dict) and not raw_rules and any(k in CATEGORY_ISSUE_TYPE for k in data):
+    if isinstance(data, dict) and not raw_rules and any(k in category_map for k in data):
         # 少写了 "rules" 外层、顶层直接是类别分组：按该写法解析，避免静默加载 0 条规则
         notes.append("未找到 rules 外层，已按“顶层直接是类别分组”解析")
         raw_rules = data
@@ -317,7 +357,7 @@ def load_rules(rules_path: Optional[Path], explicit: bool) -> Tuple[List[Pattern
         notes.append("rules 不是按类别分组的对象")
         raw_rules = {}
 
-    rules = _parse_rules(raw_rules, notes)
+    rules = _parse_rules(raw_rules, notes, category_map)
 
     if not rules and "内置兜底规则" not in source:
         # 文件存在却一条规则都没加载到：宁可回退内置规则并写明原因，也不要静默少做 3 项检查
@@ -326,7 +366,7 @@ def load_rules(rules_path: Optional[Path], explicit: bool) -> Tuple[List[Pattern
             raise ValueError(f"规则文件未提供任何可用规则：{rules_path}（{reason}）")
         source = f"内置兜底规则（{rules_path} 未提供可用规则：{reason}）"
         notes = []
-        rules = _parse_rules(BUILTIN_RULES, [])
+        rules = _parse_rules(BUILTIN_RULES, [], CATEGORY_ISSUE_TYPE)
 
     if notes:
         source = f"{source}（{'；'.join(notes)}）"
@@ -340,7 +380,7 @@ _REPLACEMENT_CHAR_ACTION = "该字符是解码失败的占位符，内容已丢�
 
 
 # 代码块外检查全部规则类别；代码块内只检查乱码类规则（避免把示例代码误报为占位符）
-RULE_TYPES_OUTSIDE_FENCE = {"ocr_marker", "placeholder", "mojibake"}
+RULE_TYPES_OUTSIDE_FENCE = {"ocr_marker", "placeholder", "mojibake", "html_entity", "escape_residue", "markdown_residue"}
 RULE_TYPES_INSIDE_FENCE = {"mojibake"}
 
 
@@ -717,8 +757,10 @@ def build_report_data(
     rules_source: str,
     max_file_size: int,
     report_base_name: str,
+    enable_extra: bool = False,
 ) -> Dict[str, Any]:
     """汇总审查结果：统一编号、统计，组装报告数据（HTML 报告与清单表格共用）。"""
+    check_items = CHECK_ITEMS + EXTRA_CHECK_ITEMS if enable_extra else CHECK_ITEMS
     # 问题统一编号（KA-0001 起）
     all_issues: List[Issue] = []
     for fr in results:
@@ -764,10 +806,10 @@ def build_report_data(
                 "output_dir": str(output_dir.resolve()),
                 "report_names": [f"{report_base_name}{suffix}" for suffix in REPORT_SUFFIXES],
             },
-            "checks": check_items_scope(),
+            "checks": check_items_scope(enable_extra),
             "notes": [
-                "检查口径为 " + checks_summary() + "（各项口径见本报告“二、问题分布”）。",
-                "报告与清单表格的「问题类型」就是上列检查项名称；6 项检查的问题全部计入"
+                "检查口径为 " + checks_summary(check_items) + "（各项口径见本报告“二、问题分布”）。",
+                f"报告与清单表格的「问题类型」就是上列检查项名称；{len(check_items)} 项检查的问题全部计入"
                 "「存在问题文件数 / 问题总数」，并逐行写入清单表格。",
                 "仅检查扩展名为 .md / .markdown 的文件；其他格式未检查。",
                 "表格列数与表头不一致、表格空单元格、空章节、代码块未闭合、疑似文本截断等结构类写法"
@@ -788,6 +830,8 @@ def build_report_data(
         "files_with_issues": sum(1 for fr in results if fr.issues),
         "issues_total": len(all_issues),
         "issues_by_type": by_type,
+        "check_items": list(check_items),
+        "checks_summary": checks_summary(check_items),
         "noise_issue_types": noise_types,
         "files_top": top_files_by_issues(files_info),
         "files": files_info,
@@ -852,7 +896,7 @@ def render_html_report(data: Dict[str, Any]) -> str:
         ]
     )
     profile_note = (
-        f"检查口径为 {checks_summary()}；上列统计就是这 {len(CHECK_ITEMS)} 项检查检出的问题，"
+        f"检查口径为 {data.get('checks_summary') or checks_summary()}；上列统计就是这 {len(data.get('check_items') or CHECK_ITEMS)} 项检查检出的问题，"
         "全部逐行写入同名 XLSX 清单表格。"
     )
     sections = [section("一、审查概况", kpis, profile_note)]
@@ -869,12 +913,12 @@ def render_html_report(data: Dict[str, Any]) -> str:
                 f"{by_type.get(type_id, 0) * 100.0 / issues_total:.1f}%",
                 desc,
             ]
-            for type_id, name, desc in CHECK_ITEMS
+            for type_id, name, desc in (data.get("check_items") or CHECK_ITEMS)
         ]
         body = (
             '<div class="note">问题最多的文件：</div>'
             + table(["文件", "问题数"], file_rows, align=["", "num"])
-            + f'<div class="note">按检查项分布（共 {len(CHECK_ITEMS)} 项；数量为 0 表示该项未发现问题）：</div>'
+            + f'<div class="note">按检查项分布（共 {len(data.get("check_items") or CHECK_ITEMS)} 项；数量为 0 表示该项未发现问题）：</div>'
             + table(["检查项", "数量", "占比", "口径说明"], check_rows, align=["", "num", "num", ""])
         )
         note_parts: List[str] = []
@@ -938,7 +982,7 @@ def render_html_report(data: Dict[str, Any]) -> str:
         "同名清单表格（.xlsx）逐行列出全部问题：文件、行号、问题类型、问题说明、证据原文；"
         "「问题类型」就是本报告的检查项名称（如「替换字符 U+FFFD」「OCR 标记残留」）；"
         "行号为空表示该问题覆盖整个文件、无法定位到具体行。",
-        "本次实际执行的检查项：" + checks_summary() + "。",
+        "本次实际执行的检查项：" + (data.get("checks_summary") or checks_summary()) + "。",
     ]
     sections.append(
         section(
@@ -1030,6 +1074,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="发现问题时以退出码 3 退出（供 CI 卡口）",
     )
     parser.add_argument("--no-progress", action="store_true", help="关闭进度条（默认在交互式终端显示）")
+    parser.add_argument(
+        "--extra-rules",
+        action="store_true",
+        help="启用可选扩展转写规则（HTML 实体残留 / 字面转义残留 / Markdown 残留）；默认关闭",
+    )
     return parser
 
 
@@ -1057,7 +1106,7 @@ def run(argv: Optional[List[str]] = None) -> int:
         default_rules = SCRIPT_DIR.parent / "rules" / "ocr_patterns.json"
         rules_path = default_rules if default_rules.is_file() else None
     try:
-        rules, rules_source = load_rules(rules_path, explicit=bool(args.rules))
+        rules, rules_source = load_rules(rules_path, explicit=bool(args.rules), enable_extra=args.extra_rules)
     except (FileNotFoundError, ValueError) as exc:
         safe_print(f"[错误] {exc}")
         return 2
@@ -1094,7 +1143,8 @@ def run(argv: Optional[List[str]] = None) -> int:
             safe_print(f"[audit_markdown]   - {fr.rel_path}：{fr.skip_reason}")
 
     data = build_report_data(
-        input_path, output_dir, results, rules_source, args.max_file_size, args.report_name
+        input_path, output_dir, results, rules_source, args.max_file_size, args.report_name,
+        enable_extra=args.extra_rules,
     )
 
     # 写盘兜底：目录只读、磁盘写满、交付文件被 Excel/WPS 占用等都会抛 OSError，这里统一转成清晰错误而不是崩栈
@@ -1106,7 +1156,7 @@ def run(argv: Optional[List[str]] = None) -> int:
         return print_error(f"无法写入交付文件（目录 {output_dir}）：{exc}")
     safe_print(
         f"[audit_markdown] XLSX 清单表格：{sheet_path}（{data['issues_total']} 行，一行一处问题；"
-        f"检查项 {len(CHECK_ITEMS)} 项）"
+        f"检查项 {len(data.get('check_items') or CHECK_ITEMS)} 项）"
     )
 
     safe_print(

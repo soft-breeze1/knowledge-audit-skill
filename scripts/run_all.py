@@ -67,6 +67,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--allow-empty", action="store_true", help="输入为空时也生成报告（默认以退出码 1 结束）")
     parser.add_argument("--fail-on-issue", action="store_true", help="发现问题时以退出码 3 结束")
     parser.add_argument("--no-progress", action="store_true", help="关闭进度条")
+    parser.add_argument("--extra-rules", action="store_true",
+                        help="启用可选扩展转写规则（HTML 实体 / 字面转义 / Markdown 残留）；默认关闭")
 
     online = parser.add_argument_group("在线知识库抓取（--url）")
     online.add_argument("--url", default=None, help="在线知识库列表页地址（如 https://kb.example.com/knowledge/asset）")
@@ -220,6 +222,7 @@ def run(argv: Optional[List[str]] = None) -> int:
             [str(input_path), "--output", str(run_dir), "--report-name", args.report_name]
             + ["--max-file-size", str(args.max_file_size)]
             + (["--rules", args.rules] if args.rules else [])
+            + (["--extra-rules"] if args.extra_rules else [])
             + (["--no-progress"] if args.no_progress else [])
             + (["--fail-on-issue"] if args.fail_on_issue else []),
         ),
