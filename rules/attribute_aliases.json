@@ -41,7 +41,15 @@
     "成槽宽度": ["槽宽", "trench width"],
     "成槽厚度": ["槽厚", "trench depth", "trench thickness"],
     "冲击频率": ["冲击次数", "冲击频次", "impact frequency"],
-    "防护等级": ["防护级别", "IP等级", "ingress protection"]
+    "防护等级": ["防护级别", "IP等级", "ingress protection"],
+    "挖掘力": ["铲斗挖掘力", "斗杆挖掘力", "bucket digging force", "digging force"],
+    "牵引力": ["最大牵引力", "tractive force", "drawbar pull"],
+    "扭矩": ["输出扭矩", "峰值扭矩", "最大扭矩", "torque"],
+    "接近角": ["approach angle"],
+    "离去角": ["departure angle"],
+    "最小转弯半径": ["转弯半径", "turning radius"],
+    "气缸数": ["缸数", "number of cylinders"],
+    "燃油消耗率": ["油耗", "比油耗", "燃油消耗", "fuel consumption", "specific fuel consumption"]
   },
   "unit_symbols": {
     "毫米": "mm", "厘米": "cm", "分米": "dm", "米": "m", "千米": "km", "公里": "km",
@@ -61,6 +69,8 @@
     "立方米每小时": "m³/h", "立方米/小时": "m³/h", "升/秒": "L/s", "升/分": "L/min", "升/分钟": "L/min",
     "米/秒": "m/s", "米/分": "m/min", "公里/小时": "km/h", "千米/小时": "km/h",
     "次/分": "次/min", "次/分钟": "次/min",
+    "克/千瓦时": "g/kWh", "g/kWh": "g/kWh", "g/(kW·h)": "g/kWh",
+    "千克/立方米": "kg/m³", "kg/m³": "kg/m³", "kg/m3": "kg/m³",
     "％": "%"
   },
   "units": {
